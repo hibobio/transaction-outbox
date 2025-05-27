@@ -241,7 +241,7 @@ public class DefaultPersistor implements Persistor, Validatable {
         if (results[i] != 1) {
           throw new OptimisticLockException();
         }
-        log.debug("Batch deleted {}", entries.get(i).description());
+        log.trace("Batch deleted {}", entries.get(i).description());
       }
       log.debug("Batch deleted {} entries", results.length);
     }
@@ -310,7 +310,7 @@ public class DefaultPersistor implements Persistor, Validatable {
           throw new OptimisticLockException();
         }
         entries.get(i).setVersion(entries.get(i).getVersion() + 1);
-        log.debug("Batch updated {}", entries.get(i).description());
+        log.trace("Batch updated {}", entries.get(i).description());
       }
       log.debug("Batch updated {} entries", results.length);
     }
@@ -588,7 +588,7 @@ public class DefaultPersistor implements Persistor, Validatable {
               .processed(rs.getBoolean("processed"))
               .version(rs.getInt("version"))
               .build();
-      log.debug("Found {}", entry);
+      log.trace("Found {}", entry);
       return entry;
     }
   }

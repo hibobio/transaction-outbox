@@ -136,8 +136,8 @@ public class Invocation {
 
     Method method = instance.getClass().getDeclaredMethod(methodName, parameterTypes);
     method.setAccessible(true);
-    if (log.isDebugEnabled()) {
-      log.debug("Invoking method {} with args {}", method, Arrays.toString(args));
+    if (log.isTraceEnabled()) {
+      log.trace("Invoking method {} with args {}", method, Arrays.toString(args));
     }
     listener.wrapInvocation(() -> method.invoke(instance, args));
   }

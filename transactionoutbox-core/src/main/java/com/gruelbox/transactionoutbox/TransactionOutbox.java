@@ -331,8 +331,7 @@ public interface TransactionOutbox {
      *     batches while still maintaining order within each topic. Defaults to false.
      * @return Builder.
      */
-    public TransactionOutboxBuilder useOrderedBatchProcessing(
-        boolean useOrderedBatchProcessing) {
+    public TransactionOutboxBuilder useOrderedBatchProcessing(boolean useOrderedBatchProcessing) {
       this.useOrderedBatchProcessing = useOrderedBatchProcessing;
       return this;
     }

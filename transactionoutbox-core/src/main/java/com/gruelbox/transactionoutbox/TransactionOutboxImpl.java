@@ -100,12 +100,12 @@ final class TransactionOutboxImpl implements TransactionOutbox, Validatable {
               var entries = batchSource.apply(transaction);
               List<TransactionOutboxEntry> result = new ArrayList<>(entries.size());
               for (var entry : entries) {
-                log.debug("Triggering {}", entry.description());
+                log.trace("Triggering {}", entry.description());
                 try {
                   pushBack(transaction, entry);
                   result.add(entry);
                 } catch (OptimisticLockException e) {
-                  log.debug("Beaten to optimistic lock on {}", entry.description());
+                  log.trace("Beaten to optimistic lock on {}", entry.description());
                 }
               }
               return result;
@@ -124,7 +124,7 @@ final class TransactionOutboxImpl implements TransactionOutbox, Validatable {
               var entries = batchSource.apply(transaction);
               List<TransactionOutboxEntry> result = new ArrayList<>(entries.size());
               for (var entry : entries) {
-                log.debug("Triggering {}", entry.description());
+                log.trace("Triggering {}", entry.description());
                 entry.setLastAttemptTime(clockProvider.get().instant());
                 entry.setNextAttemptTime(after(attemptFrequency));
                 validator.validate(entry);
@@ -471,9 +471,9 @@ final class TransactionOutboxImpl implements TransactionOutbox, Validatable {
   private void invokeBatchEntries(List<TransactionOutboxEntry> entries, Transaction tx)
       throws NoSuchMethodException, IllegalAccessException, InvocationTargetException {
     for (TransactionOutboxEntry entry : entries) {
-      log.info("Processing item in batch: {}", entry.description());
+      log.trace("Processing item in batch: {}", entry.description());
       invoke(entry, tx);
-      log.info("Processed item in batch: {}", entry.description());
+      log.trace("Processed item in batch: {}", entry.description());
     }
   }
 
@@ -498,7 +498,7 @@ final class TransactionOutboxImpl implements TransactionOutbox, Validatable {
   private void invoke(TransactionOutboxEntry entry, Transaction transaction)
       throws NoSuchMethodException, IllegalAccessException, InvocationTargetException {
     Object instance = instantiator.getInstance(entry.getInvocation().getClassName());
-    log.debug("Created instance {}", instance);
+    log.trace("Created instance {}", instance);
     transactionManager
         .injectTransaction(entry.getInvocation(), transaction)
         .invoke(instance, listener);
