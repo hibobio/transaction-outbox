@@ -340,7 +340,7 @@ public interface TransactionOutbox {
 
     /**
      * @param backoffSeedMs The initial backoff time (in milliseconds) to use when lock contention
-     *     occurs. This value is used as the base for exponential backoff. Defaults to 100ms.
+     *     occurs. This value is used as the base for exponential backoff. Defaults to 1000ms.
      * @return Builder.
      */
     public TransactionOutboxBuilder backoffSeedMs(int backoffSeedMs) {
@@ -350,7 +350,7 @@ public interface TransactionOutbox {
 
     /**
      * @param backoffMaxMs The maximum backoff time (in milliseconds) when lock contention occurs.
-     *     This caps the exponential backoff to prevent excessive delays. Defaults to 5000ms (5
+     *     This caps the exponential backoff to prevent excessive delays. Defaults to 10,000ms (10
      *     seconds).
      * @return Builder.
      */
