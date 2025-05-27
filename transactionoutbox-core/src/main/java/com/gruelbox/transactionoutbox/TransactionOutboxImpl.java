@@ -671,7 +671,7 @@ final class TransactionOutboxImpl implements TransactionOutbox, Validatable {
               retentionThreshold == null ? Duration.ofDays(7) : retentionThreshold,
               this.useOrderedBatchProcessing != null && this.useOrderedBatchProcessing,
               this.backoffSeedMs <= 0 ? 1000 : this.backoffSeedMs,
-              this.backoffMaxMs <= 0 ? 10000 : this.backoffMaxMs);
+              this.backoffMaxMs <= 0 ? 60000 : this.backoffMaxMs);
       validator.validate(impl);
       if (initializeImmediately == null || initializeImmediately) {
         impl.initialize();

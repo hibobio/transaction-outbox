@@ -350,7 +350,7 @@ public interface TransactionOutbox {
 
     /**
      * @param backoffMaxMs The maximum backoff time (in milliseconds) when lock contention occurs.
-     *     This caps the exponential backoff to prevent excessive delays. Defaults to 10,000ms (10
+     *     This caps the exponential backoff to prevent excessive delays. Defaults to 60,000ms (60
      *     seconds).
      * @return Builder.
      */
