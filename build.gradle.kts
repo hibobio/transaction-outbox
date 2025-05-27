@@ -53,6 +53,15 @@ subprojects {
 
     afterEvaluate {
         publishing {
+            repositories {
+                maven {
+                    url = uri(System.getenv("ARTIFACTORY_MAVEN_URL"))
+                    credentials {
+                        username = System.getenv("ARTIFACTORY_USER")
+                        password = System.getenv("ARTIFACTORY_PASSWORD")
+                    }
+                }
+            }
             publications.create<MavenPublication>(project.name) {
                 from(project.components["java"])
                 pom.withXml {}

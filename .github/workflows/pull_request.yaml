@@ -1,0 +1,25 @@
+name: PR workflow
+on:
+  pull_request:
+    types: [opened, reopened]
+    branches: [ master ]
+
+jobs:
+  build_and_test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        jdk: [ 11,17,21 ]
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: ${{ matrix.jdk }}
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Build
+        run: ./gradlew -Porg.gradle.java.installations.auto-download=false --no-daemon --build-cache build
