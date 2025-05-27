@@ -18,6 +18,8 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -48,9 +50,13 @@ final class TransactionOutboxImpl implements TransactionOutbox, Validatable {
   private final Validator validator;
   private final Duration retentionThreshold;
   private final boolean enableOrderedBatchProcessing;
+  private final AtomicLong backoffUntilTimestamp = new AtomicLong(0);
+  private final AtomicInteger consecutiveFailures = new AtomicInteger(0);
   private final AtomicBoolean initialized = new AtomicBoolean();
   private final ProxyFactory proxyFactory = new ProxyFactory();
   private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+  private final int backoffSeedMs;
+  private final int backoffMaxMs;
 
   @Override
   public void validate(Validator validator) {
@@ -173,6 +179,16 @@ final class TransactionOutboxImpl implements TransactionOutbox, Validatable {
     if (!initialized.get()) {
       throw new IllegalStateException("Not initialized");
     }
+
+    // Check if we're in backoff period - if so, skip processing entirely
+    long currentTime = System.currentTimeMillis();
+    long backoffTime = backoffUntilTimestamp.get();
+
+    if (currentTime < backoffTime) {
+      log.debug("Node in backoff mode. Skipping flush for {}ms more", backoffTime - currentTime);
+      return false;
+    }
+
     Instant now = clockProvider.get().instant();
     List<CompletableFuture<Boolean>> futures = new ArrayList<>();
 
@@ -413,13 +429,26 @@ final class TransactionOutboxImpl implements TransactionOutbox, Validatable {
       return;
     }
     initialize();
+
     try {
       transactionManager.inTransactionThrows(
           tx -> {
             if (!persistor.lockBatch(tx, entries)) {
               log.debug("Could not lock all entries in batch, skipping processing.");
+
+              // Apply exponential backoff with fixed exponent formula
+              int failures = consecutiveFailures.incrementAndGet();
+              // Use bitshift for powers of 2, but cap at max value
+              long backoffMs = Math.min(backoffMaxMs, backoffSeedMs * (1 << Math.min(failures, 6)));
+              long nextAttemptTime = System.currentTimeMillis() + backoffMs;
+              backoffUntilTimestamp.set(nextAttemptTime);
+
+              log.debug("Setting node backoff for {}ms", backoffMs);
               return;
             }
+
+            // Reset counter on success
+            consecutiveFailures.set(0);
 
             try {
               invokeBatchEntries(entries, tx);
@@ -640,7 +669,9 @@ final class TransactionOutboxImpl implements TransactionOutbox, Validatable {
               serializeMdc == null || serializeMdc,
               validator,
               retentionThreshold == null ? Duration.ofDays(7) : retentionThreshold,
-              useOrderedBatchProcessing != null && useOrderedBatchProcessing);
+              this.useOrderedBatchProcessing != null && this.useOrderedBatchProcessing,
+              this.backoffSeedMs <= 0 ? 7000 : this.backoffSeedMs,
+              this.backoffMaxMs <= 0 ? 70000 : this.backoffMaxMs);
       validator.validate(impl);
       if (initializeImmediately == null || initializeImmediately) {
         impl.initialize();
