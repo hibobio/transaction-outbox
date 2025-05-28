@@ -55,7 +55,7 @@ subprojects {
         publishing {
             repositories {
                 maven {
-                    url = uri(System.getenv("ARTIFACTORY_MAVEN_URL") ?: "https://hibob.jfrog.io/hibob/sbt-release")
+                    url = uri(System.getenv("ARTIFACTORY_MAVEN_URL"))
                     credentials {
                         username = System.getenv("ARTIFACTORY_USER")
                         password = System.getenv("ARTIFACTORY_PASSWORD")
