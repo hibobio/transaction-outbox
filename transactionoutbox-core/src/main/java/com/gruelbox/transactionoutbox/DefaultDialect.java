@@ -95,7 +95,7 @@ class DefaultDialect implements Dialect {
             + " FROM {{table}}"
             + " WHERE processed = false AND topic <> '*'"
             + ")"
-            + " SELECT * FROM raw WHERE rn <= {{batchSize}} AND nextAttemptTime < ?";
+            + " SELECT * FROM raw WHERE rn <= {{batchSize}} AND nextAttemptTime < ? LIMIT {{batchSize}}";
     private String fetchCurrentVersion = "SELECT version FROM TXNO_VERSION FOR UPDATE";
     private String fetchNextSequence = "SELECT seq FROM TXNO_SEQUENCE WHERE topic = ? FOR UPDATE";
 

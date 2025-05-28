@@ -94,7 +94,7 @@ public interface Dialect {
                   + " FROM {{table}}"
                   + " WHERE processed = false AND topic <> '*'"
                   + ")"
-                  + " SELECT * FROM raw WHERE rn <= {{batchSize}} AND nextAttemptTime < ?")
+                  + " SELECT * FROM raw WHERE rn <= {{batchSize}} AND nextAttemptTime < ? LIMIT {{batchSize}}")
           .deleteExpired(
               "DELETE FROM {{table}} WHERE id IN "
                   + "(SELECT id FROM {{table}} WHERE nextAttemptTime < ? AND processed = true AND blocked = false LIMIT {{batchSize}})")
@@ -131,6 +131,13 @@ public interface Dialect {
               "WITH cte1 AS (SELECT {{allFields}}, (ROW_NUMBER() OVER(PARTITION BY topic ORDER BY seq)) as rn"
                   + " FROM {{table}} WHERE processed = 0 AND topic IN ({{topicNames}}))"
                   + " SELECT * FROM cte1 WHERE rn = 1 AND nextAttemptTime < ? AND ROWNUM <= {{batchSize}}")
+          .fetchNextBatchInTopics(
+              "WITH raw AS ("
+                  + " SELECT {{allFields}}, ROW_NUMBER() OVER (PARTITION BY topic ORDER BY seq) as rn"
+                  + " FROM {{table}}"
+                  + " WHERE processed = 0 AND topic <> '*'"
+                  + ")"
+                  + " SELECT * FROM raw WHERE rn <= {{batchSize}} AND nextAttemptTime < ? AND ROWNUM <= {{batchSize}}")
           .deleteExpired(
               "DELETE FROM {{table}} WHERE nextAttemptTime < ? AND processed = 1 AND blocked = 0 "
                   + "AND ROWNUM <= {{batchSize}}")
@@ -210,6 +217,13 @@ public interface Dialect {
                   + " AND seq = ("
                   + "SELECT MIN(seq) FROM {{table}} b WHERE b.topic=a.topic AND b.processed = 0"
                   + ")")
+          .fetchNextBatchInTopics(
+              "WITH raw AS ("
+                  + " SELECT {{allFields}}, ROW_NUMBER() OVER (PARTITION BY topic ORDER BY seq) as rn"
+                  + " FROM {{table}}"
+                  + " WHERE processed = 0 AND topic <> '*'"
+                  + ")"
+                  + " SELECT TOP ({{batchSize}}) * FROM raw WHERE rn <= {{batchSize}} AND nextAttemptTime < ?")
           .fetchNextSequence(
               "SELECT seq FROM TXNO_SEQUENCE WITH (UPDLOCK, ROWLOCK, READPAST) WHERE topic = ?")
           .booleanValueFrom(v -> v ? "1" : "0")
