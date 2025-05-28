@@ -53,12 +53,14 @@ subprojects {
 
     afterEvaluate {
         publishing {
-            repositories {
-                maven {
-                    url = uri(System.getenv("ARTIFACTORY_MAVEN_URL"))
-                    credentials {
-                        username = System.getenv("ARTIFACTORY_USER")
-                        password = System.getenv("ARTIFACTORY_PASSWORD")
+            if (!System.getenv("ARTIFACTORY_MAVEN_URL").isNullOrEmpty()) {
+                repositories {
+                    maven {
+                        url = uri(System.getenv("ARTIFACTORY_MAVEN_URL"))
+                        credentials {
+                            username = System.getenv("ARTIFACTORY_USER")
+                            password = System.getenv("ARTIFACTORY_PASSWORD")
+                        }
                     }
                 }
             }
