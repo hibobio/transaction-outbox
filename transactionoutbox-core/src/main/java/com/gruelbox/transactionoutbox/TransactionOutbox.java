@@ -159,6 +159,8 @@ public interface TransactionOutbox {
   @SuppressWarnings("WeakerAccess")
   void processNow(TransactionOutboxEntry entry);
 
+  void processBatchNow(List<TransactionOutboxEntry> entries);
+
   /** Builder for {@link TransactionOutbox}. */
   @ToString
   abstract class TransactionOutboxBuilder {
@@ -176,6 +178,9 @@ public interface TransactionOutbox {
     protected Boolean serializeMdc;
     protected Duration retentionThreshold;
     protected Boolean initializeImmediately;
+    protected Boolean useOrderedBatchProcessing;
+    protected int batchLockBackoffSeedMs;
+    protected int batchLockBackoffMaxMs;
 
     protected TransactionOutboxBuilder() {}
 
@@ -319,6 +324,39 @@ public interface TransactionOutbox {
      */
     public TransactionOutboxBuilder initializeImmediately(boolean initializeImmediately) {
       this.initializeImmediately = initializeImmediately;
+      return this;
+    }
+
+    /**
+     * @param useOrderedBatchProcessing If true, enables batch processing of ordered items within
+     *     topics. This allows for more efficient processing of ordered items by processing them in
+     *     batches while still maintaining order within each topic. Defaults to false.
+     * @return Builder.
+     */
+    public TransactionOutboxBuilder useOrderedBatchProcessing(boolean useOrderedBatchProcessing) {
+      this.useOrderedBatchProcessing = useOrderedBatchProcessing;
+      return this;
+    }
+
+    /**
+     * @param batchLockBackoffSeedMs The initial backoff time (in milliseconds) to use when lock
+     *     contention occurs. This value is used as the base for exponential backoff. Defaults to
+     *     1000ms.
+     * @return Builder.
+     */
+    public TransactionOutboxBuilder batchLockBackoffSeedMs(int batchLockBackoffSeedMs) {
+      this.batchLockBackoffSeedMs = batchLockBackoffSeedMs;
+      return this;
+    }
+
+    /**
+     * @param batchLockBackoffMaxMs The maximum backoff time (in milliseconds) when lock contention
+     *     occurs. This caps the exponential backoff to prevent excessive delays. Defaults to
+     *     60,000ms (60 seconds).
+     * @return Builder.
+     */
+    public TransactionOutboxBuilder batchLockBackoffMaxMs(int batchLockBackoffMaxMs) {
+      this.batchLockBackoffMaxMs = batchLockBackoffMaxMs;
       return this;
     }
 

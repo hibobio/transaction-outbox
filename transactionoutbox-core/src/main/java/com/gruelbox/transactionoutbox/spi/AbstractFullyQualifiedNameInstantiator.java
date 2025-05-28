@@ -24,7 +24,7 @@ public abstract class AbstractFullyQualifiedNameInstantiator implements Instanti
 
   @Override
   public final Object getInstance(String name) {
-    log.debug("Getting class by name [{}]", name);
+    log.trace("Getting class by name [{}]", name);
     return createInstance(uncheckedly(() -> Class.forName(name)));
   }
 
