@@ -180,15 +180,6 @@ final class TransactionOutboxImpl implements TransactionOutbox, Validatable {
       throw new IllegalStateException("Not initialized");
     }
 
-    // Check if we're in backoff period - if so, skip processing entirely
-    long currentTime = System.currentTimeMillis();
-    long backoffTime = backoffUntilTimestamp.get();
-
-    if (currentTime < backoffTime) {
-      log.debug("Node in backoff mode. Skipping flush for {}ms more", backoffTime - currentTime);
-      return false;
-    }
-
     Instant now = clockProvider.get().instant();
     List<CompletableFuture<Boolean>> futures = new ArrayList<>();
 
@@ -206,17 +197,27 @@ final class TransactionOutboxImpl implements TransactionOutbox, Validatable {
             .thenApply(it -> false));
 
     if (enableOrderedBatchProcessing) {
-      futures.add(
-          CompletableFuture.supplyAsync(
-              () -> {
-                log.debug("Flushing topics in batches");
-                return doBatchFlush(
-                    tx ->
-                        uncheckedly(
-                            () -> persistor.selectNextBatchInTopics(tx, flushBatchSize, now)),
-                    executor);
-              },
-              executor));
+
+      // Check if we're in backoff period - if so, skip processing entirely
+      long currentTime = System.currentTimeMillis();
+      long backoffTime = backoffUntilTimestamp.get();
+
+      if (currentTime < backoffTime) {
+        log.debug("Node in backoff mode. Skipping flush for {}ms more", backoffTime - currentTime);
+      } else {
+        futures.add(
+            CompletableFuture.supplyAsync(
+                () -> {
+                  log.debug("Flushing topics in batches");
+                  return doBatchFlush(
+                      tx ->
+                          uncheckedly(
+                              () -> persistor.selectNextBatchInTopics(tx, flushBatchSize, now)),
+                      executor);
+                },
+                executor));
+      }
+
     } else {
       futures.add(
           CompletableFuture.supplyAsync(
@@ -439,7 +440,9 @@ final class TransactionOutboxImpl implements TransactionOutbox, Validatable {
               // Apply exponential backoff with fixed exponent formula
               int failures = consecutiveFailures.incrementAndGet();
               // Use bitshift for powers of 2, but cap at max value
-              long backoffMs = Math.min(batchLockBackoffMaxMs, batchLockBackoffSeedMs * (1 << Math.min(failures, 6)));
+              long backoffMs =
+                  Math.min(
+                      batchLockBackoffMaxMs, batchLockBackoffSeedMs * (1 << Math.min(failures, 6)));
               long nextAttemptTime = System.currentTimeMillis() + backoffMs;
               backoffUntilTimestamp.set(nextAttemptTime);
 
