@@ -55,8 +55,8 @@ final class TransactionOutboxImpl implements TransactionOutbox, Validatable {
   private final AtomicBoolean initialized = new AtomicBoolean();
   private final ProxyFactory proxyFactory = new ProxyFactory();
   private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-  private final int backoffSeedMs;
-  private final int backoffMaxMs;
+  private final int batchLockBackoffSeedMs;
+  private final int batchLockBackoffMaxMs;
 
   @Override
   public void validate(Validator validator) {
@@ -439,7 +439,7 @@ final class TransactionOutboxImpl implements TransactionOutbox, Validatable {
               // Apply exponential backoff with fixed exponent formula
               int failures = consecutiveFailures.incrementAndGet();
               // Use bitshift for powers of 2, but cap at max value
-              long backoffMs = Math.min(backoffMaxMs, backoffSeedMs * (1 << Math.min(failures, 6)));
+              long backoffMs = Math.min(batchLockBackoffMaxMs, batchLockBackoffSeedMs * (1 << Math.min(failures, 6)));
               long nextAttemptTime = System.currentTimeMillis() + backoffMs;
               backoffUntilTimestamp.set(nextAttemptTime);
 
@@ -670,8 +670,8 @@ final class TransactionOutboxImpl implements TransactionOutbox, Validatable {
               validator,
               retentionThreshold == null ? Duration.ofDays(7) : retentionThreshold,
               this.useOrderedBatchProcessing != null && this.useOrderedBatchProcessing,
-              this.backoffSeedMs <= 0 ? 1000 : this.backoffSeedMs,
-              this.backoffMaxMs <= 0 ? 60000 : this.backoffMaxMs);
+              this.batchLockBackoffSeedMs <= 0 ? 1000 : this.batchLockBackoffSeedMs,
+              this.batchLockBackoffMaxMs <= 0 ? 60000 : this.batchLockBackoffMaxMs);
       validator.validate(impl);
       if (initializeImmediately == null || initializeImmediately) {
         impl.initialize();

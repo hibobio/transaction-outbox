@@ -179,8 +179,8 @@ public interface TransactionOutbox {
     protected Duration retentionThreshold;
     protected Boolean initializeImmediately;
     protected Boolean useOrderedBatchProcessing;
-    protected int backoffSeedMs;
-    protected int backoffMaxMs;
+    protected int batchLockBackoffSeedMs;
+    protected int batchLockBackoffMaxMs;
 
     protected TransactionOutboxBuilder() {}
 
@@ -339,23 +339,23 @@ public interface TransactionOutbox {
     }
 
     /**
-     * @param backoffSeedMs The initial backoff time (in milliseconds) to use when lock contention
+     * @param batchLockBackoffSeedMs The initial backoff time (in milliseconds) to use when lock contention
      *     occurs. This value is used as the base for exponential backoff. Defaults to 1000ms.
      * @return Builder.
      */
-    public TransactionOutboxBuilder backoffSeedMs(int backoffSeedMs) {
-      this.backoffSeedMs = backoffSeedMs;
+    public TransactionOutboxBuilder batchLockBackoffSeedMs(int batchLockBackoffSeedMs) {
+      this.batchLockBackoffSeedMs = batchLockBackoffSeedMs;
       return this;
     }
 
     /**
-     * @param backoffMaxMs The maximum backoff time (in milliseconds) when lock contention occurs.
+     * @param batchLockBackoffMaxMs The maximum backoff time (in milliseconds) when lock contention occurs.
      *     This caps the exponential backoff to prevent excessive delays. Defaults to 60,000ms (60
      *     seconds).
      * @return Builder.
      */
-    public TransactionOutboxBuilder backoffMaxMs(int backoffMaxMs) {
-      this.backoffMaxMs = backoffMaxMs;
+    public TransactionOutboxBuilder batchLockBackoffMaxMs(int batchLockBackoffMaxMs) {
+      this.batchLockBackoffMaxMs = batchLockBackoffMaxMs;
       return this;
     }
 
