@@ -26,4 +26,5 @@ jobs:
         env:
           ARTIFACTORY_USER: ${{ secrets.ARTIFACTORY_USER }}
           ARTIFACTORY_PASSWORD: ${{ secrets.ARTIFACTORY_PASSWORD }}
+          ARTIFACTORY_MAVEN_URL: ${{ secrets.ARTIFACTORY_MAVEN_URL }}
         run: ./gradlew -PcustomGroup=$GROUP -PcustomVersion=$VERSION -Porg.gradle.java.installations.auto-download=false --no-daemon --build-cache test publish --rerun-tasks
