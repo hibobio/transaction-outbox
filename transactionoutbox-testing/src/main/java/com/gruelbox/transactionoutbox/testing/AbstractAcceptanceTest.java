@@ -1,5 +1,6 @@
 package com.gruelbox.transactionoutbox.testing;
 
+import static com.gruelbox.transactionoutbox.spi.Utils.uncheckedly;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toMap;
@@ -10,10 +11,8 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import com.gruelbox.transactionoutbox.*;
 import com.zaxxer.hikari.HikariDataSource;
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.SQLException;
+
+import java.sql.*;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.*;
@@ -188,7 +187,49 @@ public abstract class AbstractAcceptanceTest extends BaseTest {
           }
         });
 
-    TransactionOutbox outbox =
+
+      transactionManager.inTransaction(
+              tx -> {
+                  try {
+                      Connection connection = tx.connection();
+                      connection.setAutoCommit(false);
+
+                      System.out.println("autocommit = " + connection.getAutoCommit()); // must be false
+
+                      try (Statement stmt = connection.createStatement()) {
+                          stmt.executeUpdate("INSERT INTO TEST_TABLE (topic, ix, foo) VALUES('sdf', 1, 2)");
+                          throw new RuntimeException("Simulated error");
+                      } catch (Exception e) {
+                          connection.rollback();
+                          log.info("Just rolled back the transaction");
+                      }
+                  } catch (Exception e) {
+                      throw new RuntimeException(e);
+                  }
+              });
+
+      transactionManager.inTransaction(
+              tx -> {
+                  try {
+                      Connection connection = tx.connection();
+                      connection.setAutoCommit(false);
+
+                      ResultSet rs = connection.createStatement().executeQuery("SELECT COUNT(*) FROM TEST_TABLE");
+                      // Expect 0 rows if rollback worked
+                      int rowCount = 0;
+                      while (rs.next()) {
+                          rowCount++;
+                      }
+                      log.info("Number of rows in the result: {}", rowCount);
+
+                  } catch (Exception e) {
+                      throw new RuntimeException(e);
+                  }
+              });
+
+
+
+      TransactionOutbox outbox =
         TransactionOutbox.builder()
             .transactionManager(transactionManager)
             .submitter(Submitter.withExecutor(unreliablePool))
