@@ -4,8 +4,6 @@ import com.gruelbox.transactionoutbox.Dialect;
 import java.time.Duration;
 import lombok.extern.slf4j.Slf4j;
 import org.jooq.SQLDialect;
-import org.junit.Ignore;
-import org.junit.jupiter.api.Disabled;
 import org.testcontainers.containers.JdbcDatabaseContainer;
 import org.testcontainers.containers.MSSQLServerContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -13,8 +11,6 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 @Slf4j
 @Testcontainers
-@Ignore
-@Disabled
 class TestJooqThreadLocalMSSqlServer2019 extends AbstractJooqAcceptanceThreadLocalTest {
 
   @Container
