@@ -20,7 +20,7 @@ jobs:
       - name: Set variables
         run: |
           echo "VERSION=$(echo $GITHUB_REF_NAME | tr -d 'v')" >> $GITHUB_ENV
-          echo "GROUP=com.hibob" >> $GITHUB_ENV
+          echo "GROUP=com.hibob.gruelbox" >> $GITHUB_ENV
 
       - name: Build and Publish
         env:
