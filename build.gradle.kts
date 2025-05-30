@@ -45,7 +45,11 @@ subprojects {
         else -> JavaVersion.VERSION_11
     }
 
-    val runtimeJavaVersion = JavaVersion.VERSION_11  // Set this to the minimum supported runtime version
+    val runtimeJavaVersion = if (project.name == "transactionoutbox-spring") {
+        JavaVersion.VERSION_17
+    } else {
+        JavaVersion.VERSION_11
+    }
 
     java {
         toolchain {
