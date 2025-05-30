@@ -39,16 +39,23 @@ subprojects {
     }
     apply(plugin = "maven-publish")
 
-    val javaVersion = when {
+    val buildJavaVersion = when {
         project.name in java21Modules -> JavaVersion.VERSION_21
         project.name in java17Modules -> JavaVersion.VERSION_17
         else -> JavaVersion.VERSION_11
     }
 
+    val runtimeJavaVersion = JavaVersion.VERSION_11  // Set this to the minimum supported runtime version
+
     java {
         toolchain {
-            languageVersion.set(JavaLanguageVersion.of(javaVersion.toString()))
+            languageVersion.set(JavaLanguageVersion.of(buildJavaVersion.toString()))
         }
+    }
+
+    tasks.withType<JavaCompile> {
+        sourceCompatibility = runtimeJavaVersion.toString()
+        targetCompatibility = runtimeJavaVersion.toString()
     }
 
     afterEvaluate {
@@ -66,7 +73,15 @@ subprojects {
             }
             publications.create<MavenPublication>(project.name) {
                 from(project.components["java"])
-                pom.withXml {}
+                pom {
+                    withXml {
+                        // Ensure the pom.xml includes the correct Java version properties
+                        asNode().appendNode("properties").apply {
+                            appendNode("maven.compiler.source", runtimeJavaVersion.toString())
+                            appendNode("maven.compiler.target", runtimeJavaVersion.toString())
+                        }
+                    }
+                }
 
                 versionMapping {
                     allVariants {
