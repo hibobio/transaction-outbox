@@ -1,0 +1,31 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Module Creation Rule
+
+When a user asks to create a module (e.g. "create module X" or "add module X"), respond with:
+
+```
+# Cursor Rules for Gradle Modules
+
+These rules must always be applied when working with modules.
+
+## Module Creation
+When creating a new module, always use the script:
+./modules.sh createModule <MODULE-NAME>
+
+This ensures:
+- Proper module directory structure creation
+- Correct version property addition to gradle.properties
+- Module list updates
+
+## Module Removal
+When removing a module, always use the script:
+./modules.sh removeModule <MODULE-NAME>
+
+This ensures:
+- Complete module directory removal
+- Proper version property removal from gradle.properties
+- Module list updates

@@ -1,0 +1,100 @@
+---
+description: Code style guidelines - language agnostic
+globs: 
+  - "**/*"
+alwaysApply: true
+---
+
+# Code Style Guidelines
+
+## Rule: Private Methods Placement
+
+All newly added private methods and private helper classes/types must be placed at the end of the file, after all public and internal methods/types.
+
+- Private methods should be grouped together at the end of the class/file
+- Private helper classes/types should also be placed at the end
+- This improves readability by keeping the public API visible at the top
+- Only applies to newly added private methods/types
+- Applies to all languages that support private methods/types (Kotlin, Scala, Java, Python, TypeScript, etc.)
+
+Example (Kotlin):
+```kotlin
+// ✅ Good: Public methods first, private methods and helper classes at the end
+class EmployeeService {
+    fun getEmployee(id: String): Employee {
+        return validateAndFetch(id)
+    }
+    
+    fun updateEmployee(employee: Employee): Employee {
+        return validateAndSave(employee)
+    }
+    
+    private fun validateAndFetch(id: String): Employee {
+        // private implementation
+    }
+    
+    private fun validateAndSave(employee: Employee): Employee {
+        // private implementation
+    }
+    
+    private data class ValidationResult(val isValid: Boolean, val error: String?)
+    
+    private class EmployeeCache {
+        // helper class implementation
+    }
+}
+```
+
+Example (Scala):
+```scala
+// ✅ Good: Public methods first, private methods and helper classes at the end
+class EmployeeService {
+  def getEmployee(id: String): Employee = {
+    validateAndFetch(id)
+  }
+  
+  def updateEmployee(employee: Employee): Employee = {
+    validateAndSave(employee)
+  }
+  
+  private def validateAndFetch(id: String): Employee = {
+    // private implementation
+  }
+  
+  private def validateAndSave(employee: Employee): Employee = {
+    // private implementation
+  }
+  
+  private case class ValidationResult(isValid: Boolean, error: Option[String])
+  
+  private class EmployeeCache {
+    // helper class implementation
+  }
+}
+```
+
+Example (Java):
+```java
+// ✅ Good: Public methods first, private methods and helper classes at the end
+public class EmployeeService {
+    public Employee getEmployee(String id) {
+        return validateAndFetch(id);
+    }
+    
+    public Employee updateEmployee(Employee employee) {
+        return validateAndSave(employee);
+    }
+    
+    private Employee validateAndFetch(String id) {
+        // private implementation
+    }
+    
+    private Employee validateAndSave(Employee employee) {
+        // private implementation
+    }
+    
+    private static class EmployeeCache {
+        // helper class implementation
+    }
+}
+```
