@@ -1,6 +1,5 @@
 # transaction-outbox
 
-[![Maven Central](https://maven-badges.herokuapp.com/maven-central/com.gruelbox/transactionoutbox-core/badge.svg)](#stable-releases)
 [![Javadocs](https://www.javadoc.io/badge/com.gruelbox/transactionoutbox-core.svg?color=blue)](https://www.javadoc.io/doc/com.gruelbox/transactionoutbox-core)
 [![GitHub Release Date](https://img.shields.io/github/release-date/gruelbox/transaction-outbox)](https://github.com/gruelbox/transaction-outbox/releases/latest)
 [![Latest snapshot](https://img.shields.io/github/v/tag/gruelbox/transaction-outbox?label=snapshot&sort=semver)](#development-snapshots)
