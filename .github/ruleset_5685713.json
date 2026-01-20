@@ -1,0 +1,37 @@
+{
+  "id": 5685713,
+  "name": "master",
+  "target": "branch",
+  "source_type": "Repository",
+  "source": "hibobio/transaction-outbox",
+  "enforcement": "disabled",
+  "conditions": {
+    "ref_name": {
+      "exclude": [],
+      "include": [
+        "~DEFAULT_BRANCH"
+      ]
+    }
+  },
+  "rules": [
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "non_fast_forward"
+    }
+  ],
+  "node_id": "RRS_lACqUmVwb3NpdG9yec46yrpezgBWwdE",
+  "created_at": "2025-05-26T20:24:39.378+03:00",
+  "updated_at": "2025-05-26T20:24:39.378+03:00",
+  "bypass_actors": [],
+  "current_user_can_bypass": "never",
+  "_links": {
+    "self": {
+      "href": "https://api.github.com/repos/hibobio/transaction-outbox/rulesets/5685713"
+    },
+    "html": {
+      "href": "https://github.com/hibobio/transaction-outbox/rules/5685713"
+    }
+  }
+}

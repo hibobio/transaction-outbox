@@ -1,0 +1,41 @@
+name: Sync Repository Settings
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - '.github/ruleset_Master.json'
+      - '.github/settings.yaml'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'If true, only report differences without updating'
+        required: false
+        type: boolean
+        default: false
+      sync_rulesets:
+        description: 'Sync rulesets from ruleset_Master.json'
+        required: false
+        type: boolean
+        default: true
+      disable_branch_protection:
+        description: 'Disable existing branch protection'
+        required: false
+        type: boolean
+        default: true
+      block_merges:
+        description: 'Block merges on default branch using update rule'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  sync:
+    uses: hibobio/backend-repositories/.github/workflows/sync-repo-settings.yaml@master
+    with:
+      dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == true || false }}
+      sync_rulesets: ${{ github.event_name == 'workflow_dispatch' && inputs.sync_rulesets == true || true }}
+      disable_branch_protection: ${{ github.event_name == 'workflow_dispatch' && inputs.disable_branch_protection == true || true }}
+      block_merges: ${{ github.event_name == 'workflow_dispatch' && inputs.block_merges == true || false }}
+    secrets: inherit
