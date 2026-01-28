@@ -43,6 +43,25 @@ public interface Persistor {
   void save(Transaction tx, TransactionOutboxEntry entry) throws Exception;
 
   /**
+   * Saves a batch of new {@link TransactionOutboxEntry}s. Should throw {@link AlreadyScheduledException}
+   * if any record already exists based on the {@code id} or {@code uniqueRequestId}.
+   *
+   * <p>Entries with {@code uniqueRequestId} set cannot be batched and should be saved individually
+   * using {@link #save(Transaction, TransactionOutboxEntry)}. Implementations should filter out such
+   * entries and save them individually before processing the batch.
+   *
+   * <p>For entries with topics (ordered batches), all entries in the batch share the same topic.
+   * Sequence numbers should be assigned sequentially starting from the current sequence value for
+   * that topic.
+   *
+   * @param tx The current {@link Transaction}.
+   * @param entries The entries to save. All properties on each object should be saved recursively.
+   * @throws AlreadyScheduledException If any entry already exists.
+   * @throws Exception Any exception.
+   */
+  void saveBatch(Transaction tx, List<TransactionOutboxEntry> entries) throws Exception;
+
+  /**
    * Deletes a {@link TransactionOutboxEntry}.
    *
    * <p>A record should only be deleted if <em>both</em> the {@code id} and {@code version} on the

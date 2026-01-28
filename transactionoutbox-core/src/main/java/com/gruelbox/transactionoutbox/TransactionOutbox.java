@@ -5,6 +5,7 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.Executor;
+import java.util.function.BiConsumer;
 import java.util.function.Supplier;
 import lombok.ToString;
 import org.slf4j.MDC;
@@ -67,6 +68,17 @@ public interface TransactionOutbox {
    * @return Builder.
    */
   ParameterizedScheduleBuilder with();
+
+  /**
+   * Schedules multiple method invocations as a batch. All entries will be saved in a single
+   * database operation for better performance.
+   *
+   * @param clazz The class to proxy.
+   * @param count The number of invocations to batch.
+   * @param <T> The type to proxy.
+   * @return A batch proxy builder.
+   */
+  <T> BatchScheduleBuilder<T> scheduleBatch(Class<T> clazz, int count);
 
   /**
    * Flush in a single thread. Calls {@link #flush(Executor)} with an {@link Executor} which runs
@@ -472,5 +484,37 @@ public interface TransactionOutbox {
      * @return The proxy of {@code T}.
      */
     <T> T schedule(Class<T> clazz);
+  }
+
+  /**
+   * Builder for scheduling multiple method invocations as a batch. All entries will be saved in a
+   * single database operation for better performance.
+   *
+   * @param <T> The type to proxy.
+   */
+  interface BatchScheduleBuilder<T> {
+
+    /**
+     * Applies ordering to all entries in the batch. All entries will share the same topic and will
+     * be assigned sequential sequence numbers.
+     *
+     * @param topic The topic name for ordering.
+     * @return This builder.
+     */
+    BatchScheduleBuilder<T> ordered(String topic);
+
+    /**
+     * Executes the batch of method invocations. The provided function will be called multiple times
+     * (count times) with an index parameter (0-based).
+     *
+     * <p>Usage example:
+     *
+     * <pre>transactionOutbox.scheduleBatch(MyService.class, 5)
+     *   .ordered("orders")
+     *   .execute((proxy, index) -> proxy.processOrder(orderIds[index]));</pre>
+     *
+     * @param invoker Function that receives the proxy and index, performs the invocation.
+     */
+    void execute(BiConsumer<T, Integer> invoker);
   }
 }

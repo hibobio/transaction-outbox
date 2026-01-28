@@ -144,6 +144,84 @@ public class DefaultPersistor implements Persistor, Validatable {
     }
   }
 
+  @Override
+  public void saveBatch(Transaction tx, List<TransactionOutboxEntry> entries)
+      throws SQLException, AlreadyScheduledException {
+    if (entries == null || entries.isEmpty()) {
+      return;
+    }
+
+    // Separate entries with uniqueRequestId (must be saved individually)
+    List<TransactionOutboxEntry> entriesWithUniqueRequestId = new ArrayList<>();
+    List<TransactionOutboxEntry> entriesToBatch = new ArrayList<>();
+
+    for (TransactionOutboxEntry entry : entries) {
+      if (entry.getUniqueRequestId() != null) {
+        entriesWithUniqueRequestId.add(entry);
+      } else {
+        entriesToBatch.add(entry);
+      }
+    }
+
+    // Save entries with uniqueRequestId individually
+    for (TransactionOutboxEntry entry : entriesWithUniqueRequestId) {
+      save(tx, entry);
+    }
+
+    if (entriesToBatch.isEmpty()) {
+      return;
+    }
+
+    // Handle sequence numbers for ordered batches (all entries share same topic if topic is set)
+    String batchTopic = null;
+    for (TransactionOutboxEntry entry : entriesToBatch) {
+      if (entry.getTopic() != null) {
+        if (batchTopic == null) {
+          batchTopic = entry.getTopic();
+        } else if (!batchTopic.equals(entry.getTopic())) {
+          throw new IllegalArgumentException(
+              "All entries in a batch must have the same topic. Found topics: " + batchTopic
+                  + " and " + entry.getTopic());
+        }
+      }
+    }
+
+    // Assign sequence numbers if topic is set
+    if (batchTopic != null) {
+      assignSequencesForBatch(tx, entriesToBatch, batchTopic);
+    }
+
+    // Batch insert all entries
+    var insertSql =
+        "INSERT INTO "
+            + tableName
+            + " ("
+            + ALL_FIELDS
+            + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+    PreparedStatement stmt = tx.prepareBatchStatement(insertSql);
+    for (TransactionOutboxEntry entry : entriesToBatch) {
+      var writer = new StringWriter();
+      serializer.serializeInvocation(entry.getInvocation(), writer);
+      setupInsert(entry, writer, stmt);
+      stmt.addBatch();
+    }
+
+    try {
+      int[] results = stmt.executeBatch();
+      log.debug("Batch inserted {} entries", results.length);
+      for (int i = 0; i < results.length; i++) {
+        log.trace("Batch inserted {}", entriesToBatch.get(i).description());
+      }
+    } catch (Exception e) {
+      if (indexViolation(e)) {
+        throw new AlreadyScheduledException(
+            "One or more entries in batch already exist", e);
+      }
+      throw e;
+    }
+  }
+
   private void setNextSequence(Transaction tx, TransactionOutboxEntry entry) throws SQLException {
     //noinspection resource
     var seqSelect = tx.prepareBatchStatement(dialect.getFetchNextSequence());
@@ -175,6 +253,74 @@ public class DefaultPersistor implements Persistor, Validatable {
         }
       }
     }
+  }
+
+  /**
+   * Assigns sequence numbers to a batch of entries for the same topic. All entries share the same
+   * topic, so we lock the sequence row once and assign sequential numbers.
+   *
+   * @param tx The current transaction
+   * @param entries The entries to assign sequence numbers to (all must have the same topic)
+   * @param topic The topic name (all entries share this topic)
+   * @throws SQLException If database error occurs
+   */
+  private void assignSequencesForBatch(
+      Transaction tx, List<TransactionOutboxEntry> entries, String topic) throws SQLException {
+    if (entries.isEmpty()) {
+      return;
+    }
+
+    // Lock and read current sequence
+    //noinspection resource
+    var seqSelect = tx.prepareBatchStatement(dialect.getFetchNextSequence());
+    seqSelect.setString(1, topic);
+    long currentSeq;
+    try (ResultSet rs = seqSelect.executeQuery()) {
+      if (rs.next()) {
+        currentSeq = rs.getLong(1);
+      } else {
+        currentSeq = 0; // Will start from 1
+      }
+    }
+
+    // Assign sequential numbers to all entries
+    for (int i = 0; i < entries.size(); i++) {
+      entries.get(i).setSequence(currentSeq + i + 1L);
+    }
+
+    // Update sequence table with new max value
+    long newSeq = currentSeq + entries.size();
+    //noinspection resource
+    var seqUpdate =
+        tx.prepareBatchStatement("UPDATE TXNO_SEQUENCE SET seq = ? WHERE topic = ?");
+    seqUpdate.setLong(1, newSeq);
+    seqUpdate.setString(2, topic);
+    int updated = seqUpdate.executeUpdate();
+
+    // If update affected 0 rows, insert instead (race condition handling)
+    if (updated == 0) {
+      try {
+        //noinspection resource
+        var seqInsert =
+            tx.prepareBatchStatement("INSERT INTO TXNO_SEQUENCE (topic, seq) VALUES (?, ?)");
+        seqInsert.setString(1, topic);
+        seqInsert.setLong(2, newSeq);
+        seqInsert.executeUpdate();
+      } catch (Exception e) {
+        if (indexViolation(e)) {
+          // Another transaction inserted it, retry the update
+          seqUpdate.executeUpdate();
+        } else {
+          throw e;
+        }
+      }
+    }
+
+    log.info(
+        "Assigned sequence numbers {} to {} for topic {}",
+        currentSeq + 1L,
+        newSeq,
+        topic);
   }
 
   private boolean indexViolation(Exception e) {

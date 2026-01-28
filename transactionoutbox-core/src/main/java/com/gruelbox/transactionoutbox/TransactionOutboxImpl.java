@@ -20,6 +20,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -97,6 +98,17 @@ final class TransactionOutboxImpl implements TransactionOutbox, Validatable {
   @Override
   public ParameterizedScheduleBuilder with() {
     return new ParameterizedScheduleBuilderImpl();
+  }
+
+  @Override
+  public <T> BatchScheduleBuilder<T> scheduleBatch(Class<T> clazz, int count) {
+    if (!initialized.get()) {
+      throw new IllegalStateException("Not initialized");
+    }
+    if (count < 0) {
+      throw new IllegalArgumentException("Batch count must be non-negative");
+    }
+    return new BatchScheduleBuilderImpl<>(clazz, count);
   }
 
   private boolean doFlush(Function<Transaction, Collection<TransactionOutboxEntry>> batchSource) {
@@ -692,11 +704,137 @@ final class TransactionOutboxImpl implements TransactionOutbox, Validatable {
     private Duration delayForAtLeast;
 
     @Override
+    public ParameterizedScheduleBuilder uniqueRequestId(String uniqueRequestId) {
+      this.uniqueRequestId = uniqueRequestId;
+      return this;
+    }
+
+    @Override
+    public ParameterizedScheduleBuilder ordered(String topic) {
+      this.ordered = topic;
+      return this;
+    }
+
+    @Override
+    public ParameterizedScheduleBuilder delayForAtLeast(Duration duration) {
+      this.delayForAtLeast = duration;
+      return this;
+    }
+
+    @Override
     public <T> T schedule(Class<T> clazz) {
       if (uniqueRequestId != null && uniqueRequestId.length() > 250) {
         throw new IllegalArgumentException("uniqueRequestId may be up to 250 characters");
       }
       return TransactionOutboxImpl.this.schedule(clazz, uniqueRequestId, ordered, delayForAtLeast);
+    }
+  }
+
+  private class BatchScheduleBuilderImpl<T> implements BatchScheduleBuilder<T> {
+
+    private final Class<T> clazz;
+    private final int count;
+    private String topic;
+
+    BatchScheduleBuilderImpl(Class<T> clazz, int count) {
+      this.clazz = clazz;
+      this.count = count;
+    }
+
+    @Override
+    public BatchScheduleBuilder<T> ordered(String topic) {
+      if (topic != null && topic.length() > 250) {
+        throw new IllegalArgumentException("Topic may be up to 250 characters");
+      }
+      this.topic = topic;
+      return this;
+    }
+
+    @Override
+    public void execute(BiConsumer<T, Integer> invoker) {
+      if (invoker == null) {
+        throw new IllegalArgumentException("Invoker cannot be null");
+      }
+
+      if (count == 0) {
+        // Empty batch - nothing to do
+        return;
+      }
+
+      // Collect all entries from batch invocations
+      List<TransactionOutboxEntry> entries = new ArrayList<>(count);
+      Transaction[] transactionHolder = new Transaction[1];
+      T proxy = proxyFactory.createProxy(
+          clazz,
+          (method, args) ->
+              uncheckedly(
+                  () -> {
+                    var extracted = transactionManager.extractTransaction(method, args);
+                    // Store transaction from first invocation
+                    if (transactionHolder[0] == null) {
+                      transactionHolder[0] = extracted.getTransaction();
+                    } else {
+                      // Verify all invocations use the same transaction
+                      if (transactionHolder[0] != extracted.getTransaction()) {
+                        throw new IllegalStateException(
+                            "All batch invocations must occur within the same transaction");
+                      }
+                    }
+                    TransactionOutboxEntry entry =
+                        newEntry(
+                            extracted.getClazz(),
+                            extracted.getMethodName(),
+                            extracted.getParameters(),
+                            extracted.getArgs(),
+                            null, // uniqueRequestId not supported in batch
+                            topic);
+                    validator.validate(entry);
+                    entries.add(entry);
+                    return null;
+                  }));
+
+      // Execute all invocations to collect entries
+      for (int i = 0; i < count; i++) {
+        invoker.accept(proxy, i);
+      }
+
+      if (entries.isEmpty()) {
+        log.debug("No entries collected from batch invocations");
+        return;
+      }
+
+      if (entries.size() != count) {
+        throw new IllegalStateException(
+            "Expected " + count + " entries but collected " + entries.size());
+      }
+
+      if (transactionHolder[0] == null) {
+        throw new IllegalStateException("No transaction context found for batch operations");
+      }
+
+      // Save all entries in batch using the transaction
+      Transaction transaction = transactionHolder[0];
+      uncheckedly(
+          () -> {
+            persistor.saveBatch(transaction, entries);
+
+            // Add post-commit hooks for all entries
+            transaction.addPostCommitHook(
+                () -> {
+                  for (TransactionOutboxEntry entry : entries) {
+                    listener.scheduled(entry);
+                    if (entry.getTopic() != null) {
+                      log.debug("Queued {} in topic {}", entry.description(), entry.getTopic());
+                    } else {
+                      submitNow(entry);
+                      log.debug(
+                          "Scheduled {} for post-commit execution", entry.description());
+                    }
+                  }
+                  log.debug("Batch scheduled {} entries", entries.size());
+                });
+            return null;
+          });
     }
   }
 }
