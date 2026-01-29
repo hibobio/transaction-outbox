@@ -16,6 +16,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.Collection;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -101,14 +102,108 @@ final class TransactionOutboxImpl implements TransactionOutbox, Validatable {
   }
 
   @Override
-  public <T> BatchScheduleBuilder<T> scheduleBatch(Class<T> clazz, int count) {
+  public <T> T scheduleBatch(Class<T> clazz) {
+    return scheduleBatch(clazz, null);
+  }
+
+  @Override
+  public <T> T scheduleBatch(Class<T> clazz, String topic) {
     if (!initialized.get()) {
       throw new IllegalStateException("Not initialized");
     }
-    if (count < 0) {
-      throw new IllegalArgumentException("Batch count must be non-negative");
-    }
-    return new BatchScheduleBuilderImpl<>(clazz, count);
+    return proxyFactory.createProxy(
+        clazz,
+        (method, args) ->
+            uncheckedly(
+                () -> {
+                  var extracted = transactionManager.extractTransaction(method, args);
+                  
+                  // Check if any argument is a Collection AND the corresponding parameter type is NOT a Collection
+                  // (if parameter type IS a Collection, we don't expand - it's meant to receive the collection)
+                  Collection<?> collectionArg = null;
+                  int collectionIndex = -1;
+                  Class<?>[] paramTypes = extracted.getParameters();
+                  
+                  for (int i = 0; i < args.length; i++) {
+                    if (args[i] instanceof Collection) {
+                      // Only expand if the parameter type is NOT a Collection
+                      if (i < paramTypes.length && !Collection.class.isAssignableFrom(paramTypes[i])) {
+                        collectionArg = (Collection<?>) args[i];
+                        collectionIndex = i;
+                        break;
+                      }
+                    }
+                  }
+
+                  if (collectionArg == null || collectionArg.isEmpty()) {
+                    // No collection found, empty collection, or parameter type is Collection - treat as single item
+                    TransactionOutboxEntry entry =
+                        newEntry(
+                            extracted.getClazz(),
+                            extracted.getMethodName(),
+                            extracted.getParameters(),
+                            extracted.getArgs(),
+                            null,
+                            topic);
+                    validator.validate(entry);
+                    persistor.save(extracted.getTransaction(), entry);
+                    extracted
+                        .getTransaction()
+                        .addPostCommitHook(
+                            () -> {
+                              listener.scheduled(entry);
+                              if (entry.getTopic() != null) {
+                                log.debug("Queued {} in topic {}", entry.description(), topic);
+                              } else {
+                                submitNow(entry);
+                                log.debug(
+                                    "Scheduled {} for post-commit execution", entry.description());
+                              }
+                            });
+                    return null;
+                  }
+
+                  // Batch mode: create entries for each item in the collection
+                  List<TransactionOutboxEntry> entries = new ArrayList<>(collectionArg.size());
+                  for (Object item : collectionArg) {
+                    // Create new args array with the item replacing the collection
+                    Object[] newArgs = args.clone();
+                    newArgs[collectionIndex] = item;
+                    
+                    TransactionOutboxEntry entry =
+                        newEntry(
+                            extracted.getClazz(),
+                            extracted.getMethodName(),
+                            extracted.getParameters(),
+                            newArgs,
+                            null, // uniqueRequestId not supported in batch
+                            topic);
+                    validator.validate(entry);
+                    entries.add(entry);
+                  }
+
+                  // Save all entries in batch
+                  persistor.saveBatch(extracted.getTransaction(), entries);
+
+                  // Add post-commit hooks for all entries
+                  extracted
+                      .getTransaction()
+                      .addPostCommitHook(
+                          () -> {
+                            for (TransactionOutboxEntry entry : entries) {
+                              listener.scheduled(entry);
+                              if (entry.getTopic() != null) {
+                                log.debug("Queued {} in topic {}", entry.description(), entry.getTopic());
+                              } else {
+                                submitNow(entry);
+                                log.debug(
+                                    "Scheduled {} for post-commit execution", entry.description());
+                              }
+                            }
+                            log.debug("Batch scheduled {} entries", entries.size());
+                          });
+                  return null;
+                }));
   }
 
   private boolean doFlush(Function<Transaction, Collection<TransactionOutboxEntry>> batchSource) {
@@ -806,6 +901,114 @@ final class TransactionOutboxImpl implements TransactionOutbox, Validatable {
       if (entries.size() != count) {
         throw new IllegalStateException(
             "Expected " + count + " entries but collected " + entries.size());
+      }
+
+      if (transactionHolder[0] == null) {
+        throw new IllegalStateException("No transaction context found for batch operations");
+      }
+
+      // Save all entries in batch using the transaction
+      Transaction transaction = transactionHolder[0];
+      uncheckedly(
+          () -> {
+            persistor.saveBatch(transaction, entries);
+
+            // Add post-commit hooks for all entries
+            transaction.addPostCommitHook(
+                () -> {
+                  for (TransactionOutboxEntry entry : entries) {
+                    listener.scheduled(entry);
+                    if (entry.getTopic() != null) {
+                      log.debug("Queued {} in topic {}", entry.description(), entry.getTopic());
+                    } else {
+                      submitNow(entry);
+                      log.debug(
+                          "Scheduled {} for post-commit execution", entry.description());
+                    }
+                  }
+                  log.debug("Batch scheduled {} entries", entries.size());
+                });
+            return null;
+          });
+    }
+  }
+
+  private class ListBatchScheduleBuilderImpl<T, P> implements ListBatchScheduleBuilder<T, P> {
+
+    private final Class<T> clazz;
+    private final List<P> payloads;
+    private String topic;
+
+    ListBatchScheduleBuilderImpl(Class<T> clazz, List<P> payloads) {
+      this.clazz = clazz;
+      this.payloads = payloads;
+    }
+
+    @Override
+    public ListBatchScheduleBuilder<T, P> ordered(String topic) {
+      if (topic != null && topic.length() > 250) {
+        throw new IllegalArgumentException("Topic may be up to 250 characters");
+      }
+      this.topic = topic;
+      return this;
+    }
+
+    @Override
+    public void execute(BiConsumer<T, P> invoker) {
+      if (invoker == null) {
+        throw new IllegalArgumentException("Invoker cannot be null");
+      }
+
+      if (payloads.isEmpty()) {
+        // Empty batch - nothing to do
+        return;
+      }
+
+      // Collect all entries from batch invocations
+      List<TransactionOutboxEntry> entries = new ArrayList<>(payloads.size());
+      Transaction[] transactionHolder = new Transaction[1];
+      T proxy = proxyFactory.createProxy(
+          clazz,
+          (method, args) ->
+              uncheckedly(
+                  () -> {
+                    var extracted = transactionManager.extractTransaction(method, args);
+                    // Store transaction from first invocation
+                    if (transactionHolder[0] == null) {
+                      transactionHolder[0] = extracted.getTransaction();
+                    } else {
+                      // Verify all invocations use the same transaction
+                      if (transactionHolder[0] != extracted.getTransaction()) {
+                        throw new IllegalStateException(
+                            "All batch invocations must occur within the same transaction");
+                      }
+                    }
+                    TransactionOutboxEntry entry =
+                        newEntry(
+                            extracted.getClazz(),
+                            extracted.getMethodName(),
+                            extracted.getParameters(),
+                            extracted.getArgs(),
+                            null, // uniqueRequestId not supported in batch
+                            topic);
+                    validator.validate(entry);
+                    entries.add(entry);
+                    return null;
+                  }));
+
+      // Execute all invocations to collect entries
+      for (P payload : payloads) {
+        invoker.accept(proxy, payload);
+      }
+
+      if (entries.isEmpty()) {
+        log.debug("No entries collected from batch invocations");
+        return;
+      }
+
+      if (entries.size() != payloads.size()) {
+        throw new IllegalStateException(
+            "Expected " + payloads.size() + " entries but collected " + entries.size());
       }
 
       if (transactionHolder[0] == null) {

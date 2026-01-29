@@ -70,15 +70,40 @@ public interface TransactionOutbox {
   ParameterizedScheduleBuilder with();
 
   /**
-   * Schedules multiple method invocations as a batch. All entries will be saved in a single
-   * database operation for better performance.
+   * Schedules method invocations in batch mode. When a method is called with a Collection argument,
+   * all items in the collection will be scheduled as a batch (saved in a single database
+   * operation). Works exactly like {@link #schedule(Class)} but automatically detects Collection
+   * arguments and batches them.
+   *
+   * <p>Usage example:
+   *
+   * <pre>transactionManager.inTransaction(tx -> {
+   *   outbox.scheduleBatch(MyService.class).processOrder(List.of(order1, order2, order3));
+   * });</pre>
    *
    * @param clazz The class to proxy.
-   * @param count The number of invocations to batch.
    * @param <T> The type to proxy.
-   * @return A batch proxy builder.
+   * @return A proxy that automatically batches Collection arguments.
    */
-  <T> BatchScheduleBuilder<T> scheduleBatch(Class<T> clazz, int count);
+  <T> T scheduleBatch(Class<T> clazz);
+
+  /**
+   * Schedules method invocations in batch mode with ordering. When a method is called with a
+   * Collection argument, all items in the collection will be scheduled as a batch with the
+   * specified topic for ordering.
+   *
+   * <p>Usage example:
+   *
+   * <pre>transactionManager.inTransaction(tx -> {
+   *   outbox.scheduleBatch(MyService.class, "orders").processOrder(List.of(order1, order2, order3));
+   * });</pre>
+   *
+   * @param clazz The class to proxy.
+   * @param topic The topic name for ordering.
+   * @param <T> The type to proxy.
+   * @return A proxy that automatically batches Collection arguments with ordering.
+   */
+  <T> T scheduleBatch(Class<T> clazz, String topic);
 
   /**
    * Flush in a single thread. Calls {@link #flush(Executor)} with an {@link Executor} which runs
@@ -516,5 +541,38 @@ public interface TransactionOutbox {
      * @param invoker Function that receives the proxy and index, performs the invocation.
      */
     void execute(BiConsumer<T, Integer> invoker);
+  }
+
+  /**
+   * Builder for scheduling multiple method invocations as a batch using a list of payloads. All
+   * entries will be saved in a single database operation for better performance.
+   *
+   * @param <T> The type to proxy.
+   * @param <P> The type of payload.
+   */
+  interface ListBatchScheduleBuilder<T, P> {
+
+    /**
+     * Applies ordering to all entries in the batch. All entries will share the same topic and will
+     * be assigned sequential sequence numbers.
+     *
+     * @param topic The topic name for ordering.
+     * @return This builder.
+     */
+    ListBatchScheduleBuilder<T, P> ordered(String topic);
+
+    /**
+     * Executes the batch of method invocations with the list of payloads. The provided function
+     * will be called once for each payload in the list.
+     *
+     * <p>Usage example:
+     *
+     * <pre>transactionOutbox.scheduleBatch(MyService.class, List.of(payload1, payload2, payload3))
+     *   .ordered("orders")
+     *   .execute((proxy, payload) -> proxy.process(payload));</pre>
+     *
+     * @param invoker Function that receives the proxy and payload, performs the invocation.
+     */
+    void execute(BiConsumer<T, P> invoker);
   }
 }

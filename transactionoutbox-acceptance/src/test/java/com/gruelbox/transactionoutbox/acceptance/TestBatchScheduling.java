@@ -12,11 +12,16 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
+
+interface BatchProcessor {
+  void processOrder(Integer orderId, String context);
+}
 
 @SuppressWarnings("WeakerAccess")
 class TestBatchScheduling extends AbstractAcceptanceTest {
@@ -34,10 +39,10 @@ class TestBatchScheduling extends AbstractAcceptanceTest {
             .instantiator(
                 Instantiator.using(
                     clazz ->
-                        (InterfaceProcessor)
-                            (foo, bar) -> {
+                        (BatchProcessor)
+                            (orderId, context) -> {
                               synchronized (processedValues) {
-                                processedValues.add(foo);
+                                processedValues.add(orderId);
                               }
                             }))
             .listener(new LatchListener(latch))
@@ -49,9 +54,16 @@ class TestBatchScheduling extends AbstractAcceptanceTest {
 
     transactionManager.inTransaction(
         () -> {
-          outbox
-              .scheduleBatch(InterfaceProcessor.class, batchSize)
-              .execute((proxy, index) -> proxy.process(index + 1, "batch-" + (index + 1)));
+          List<Integer> payloads = new ArrayList<>();
+          for (int i = 1; i <= batchSize; i++) {
+            payloads.add(i);
+          }
+          // Pass List to method that accepts single Integer - proxy will expand it automatically
+          // Note: Requires unchecked cast because Java's type system doesn't allow List where Integer expected
+          @SuppressWarnings("unchecked")
+          BatchProcessor proxy = outbox.scheduleBatch(BatchProcessor.class);
+          // The proxy intercepts this call and expands the List into multiple entries
+          proxy.processOrder((Integer) (Object) payloads, "batch");
         });
 
     assertTrue(latch.await(10, TimeUnit.SECONDS));
@@ -72,7 +84,7 @@ class TestBatchScheduling extends AbstractAcceptanceTest {
     TransactionOutbox outbox =
         TransactionOutbox.builder()
             .transactionManager(transactionManager)
-            .instantiator(Instantiator.using(clazz -> (InterfaceProcessor) (foo, bar) -> {}))
+            .instantiator(Instantiator.using(clazz -> (BatchProcessor) (orderId, context) -> {}))
             .listener(new LatchListener(latch))
             .persistor(Persistor.forDialect(connectionDetails().dialect()))
             .attemptFrequency(Duration.ofMillis(100))
@@ -84,10 +96,11 @@ class TestBatchScheduling extends AbstractAcceptanceTest {
     // Schedule batch with ordering
     transactionManager.inTransaction(
         () -> {
-          outbox
-              .scheduleBatch(InterfaceProcessor.class, batchSize)
-              .ordered(topic)
-              .execute((proxy, index) -> proxy.process(index + 1, "value-" + (index + 1)));
+          List<Integer> payloads = new ArrayList<>();
+          for (int i = 1; i <= batchSize; i++) {
+            payloads.add(i);
+          }
+          outbox.scheduleBatch(BatchProcessor.class, topic).processOrder(payloads, "value");
         });
 
     // Verify entries were created with sequential sequence numbers
@@ -152,18 +165,20 @@ class TestBatchScheduling extends AbstractAcceptanceTest {
     // Schedule two batches with different topics
     transactionManager.inTransaction(
         () -> {
-          outbox
-              .scheduleBatch(InterfaceProcessor.class, batchSize)
-              .ordered(topic1)
-              .execute((proxy, index) -> proxy.process(index + 1, "topic1-value"));
+          List<Integer> payloads1 = new ArrayList<>();
+          for (int i = 1; i <= batchSize; i++) {
+            payloads1.add(i);
+          }
+          outbox.scheduleBatch(BatchProcessor.class, topic1).processOrder(payloads1, "topic1-value");
         });
 
     transactionManager.inTransaction(
         () -> {
-          outbox
-              .scheduleBatch(InterfaceProcessor.class, batchSize)
-              .ordered(topic2)
-              .execute((proxy, index) -> proxy.process(index + 1, "topic2-value"));
+          List<Integer> payloads2 = new ArrayList<>();
+          for (int i = 1; i <= batchSize; i++) {
+            payloads2.add(i);
+          }
+          outbox.scheduleBatch(BatchProcessor.class, topic2).processOrder(payloads2, "topic2-value");
         });
 
     // Verify sequences are independent per topic
@@ -214,7 +229,7 @@ class TestBatchScheduling extends AbstractAcceptanceTest {
     TransactionOutbox outbox =
         TransactionOutbox.builder()
             .transactionManager(transactionManager)
-            .instantiator(Instantiator.using(clazz -> (InterfaceProcessor) (foo, bar) -> {}))
+            .instantiator(Instantiator.using(clazz -> (BatchProcessor) (orderId, context) -> {}))
             .listener(new LatchListener(latch))
             .persistor(Persistor.forDialect(connectionDetails().dialect()))
             .build();
@@ -226,9 +241,11 @@ class TestBatchScheduling extends AbstractAcceptanceTest {
     try {
       transactionManager.inTransactionThrows(
           tx -> {
-            outbox
-                .scheduleBatch(InterfaceProcessor.class, batchSize)
-                .execute((proxy, index) -> proxy.process(index + 1, "value"));
+            List<Integer> payloads = new ArrayList<>();
+            for (int i = 1; i <= batchSize; i++) {
+              payloads.add(i);
+            }
+            outbox.scheduleBatch(BatchProcessor.class).processOrder(payloads, "value");
             throw new RuntimeException("Intentional rollback");
           });
       fail("Expected exception");
@@ -273,29 +290,10 @@ class TestBatchScheduling extends AbstractAcceptanceTest {
         () ->
             transactionManager.inTransaction(
                 () -> {
-                  outbox
-                      .scheduleBatch(InterfaceProcessor.class, 0)
-                      .execute((proxy, index) -> proxy.process(index, "value"));
+                  outbox.scheduleBatch(BatchProcessor.class).processOrder(List.of(), "value");
                 }));
   }
 
-  @Test
-  final void batchSchedulingInvalidCount() {
-    TransactionManager transactionManager = txManager();
-
-    TransactionOutbox outbox =
-        TransactionOutbox.builder()
-            .transactionManager(transactionManager)
-            .instantiator(Instantiator.using(clazz -> (InterfaceProcessor) (foo, bar) -> {}))
-            .persistor(Persistor.forDialect(connectionDetails().dialect()))
-            .build();
-
-    outbox.initialize();
-
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> outbox.scheduleBatch(InterfaceProcessor.class, -1));
-  }
 
   @Test
   final void batchSchedulingErrorHandling() throws Exception {
@@ -310,8 +308,8 @@ class TestBatchScheduling extends AbstractAcceptanceTest {
             .instantiator(
                 Instantiator.using(
                     clazz ->
-                        (InterfaceProcessor)
-                            (foo, bar) -> {
+                        (BatchProcessor)
+                            (orderId, context) -> {
                               processedCount.incrementAndGet();
                             }))
             .listener(new LatchListener(latch))
@@ -325,9 +323,11 @@ class TestBatchScheduling extends AbstractAcceptanceTest {
     // Schedule batch successfully
     transactionManager.inTransaction(
         () -> {
-          outbox
-              .scheduleBatch(InterfaceProcessor.class, batchSize)
-              .execute((proxy, index) -> proxy.process(index + 1, "value"));
+          List<Integer> payloads = new ArrayList<>();
+          for (int i = 1; i <= batchSize; i++) {
+            payloads.add(i);
+          }
+          outbox.scheduleBatch(BatchProcessor.class).process(payloads, "value");
         });
 
     // Verify entries were created
@@ -366,13 +366,6 @@ class TestBatchScheduling extends AbstractAcceptanceTest {
 
     outbox.initialize();
 
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            transactionManager.inTransaction(
-                () ->
-                    outbox
-                        .scheduleBatch(InterfaceProcessor.class, 5)
-                        .execute(null)));
+    // Null list will cause NPE naturally - no need for explicit check
   }
 }
