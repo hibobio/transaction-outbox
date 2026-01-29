@@ -177,6 +177,163 @@ public class DefaultPersistor implements Persistor, Validatable {
     }
   }
 
+  @Override
+  public void saveBatch(Transaction tx, List<TransactionOutboxEntry> entries)
+      throws SQLException, AlreadyScheduledException {
+    if (entries == null || entries.isEmpty()) {
+      return;
+    }
+
+    // Separate entries with uniqueRequestId (must be saved individually)
+    List<TransactionOutboxEntry> entriesWithUniqueRequestId = new ArrayList<>();
+    List<TransactionOutboxEntry> entriesToBatch = new ArrayList<>();
+
+    for (TransactionOutboxEntry entry : entries) {
+      if (entry.getUniqueRequestId() != null) {
+        entriesWithUniqueRequestId.add(entry);
+      } else {
+        entriesToBatch.add(entry);
+      }
+    }
+
+    // Save entries with uniqueRequestId individually
+    for (TransactionOutboxEntry entry : entriesWithUniqueRequestId) {
+      save(tx, entry);
+    }
+
+    if (entriesToBatch.isEmpty()) {
+      return;
+    }
+
+    // Validate topic consistency: all entries must have the same topic (or all null)
+    String batchTopic = validateAndExtractTopic(entriesToBatch);
+
+    // If topic is set, acquire sequence lock once, assign all sequences, update once
+    if (batchTopic != null) {
+      assignSequencesForBatch(tx, entriesToBatch, batchTopic);
+    }
+
+    // Batch insert all entries
+    var insertSql =
+        "INSERT INTO "
+            + tableName
+            + " ("
+            + ALL_FIELDS
+            + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+    PreparedStatement stmt = tx.prepareBatchStatement(insertSql);
+    for (TransactionOutboxEntry entry : entriesToBatch) {
+      var writer = new StringWriter();
+      serializer.serializeInvocation(entry.getInvocation(), writer);
+      setupInsert(entry, writer, stmt);
+      stmt.addBatch();
+    }
+
+    try {
+      int[] results = stmt.executeBatch();
+      log.debug("Batch inserted {} entries", results.length);
+      for (int i = 0; i < results.length; i++) {
+        log.trace("Batch inserted {}", entriesToBatch.get(i).description());
+      }
+    } catch (Exception e) {
+      if (indexViolation(e)) {
+        throw new AlreadyScheduledException(
+            "One or more entries in batch already exist", e);
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * Acquires the sequence lock once for the topic, assigns sequence numbers to all entries,
+   * and updates the sequence table once. The lock is held until the transaction commits.
+   */
+  private void assignSequencesForBatch(
+      Transaction tx, List<TransactionOutboxEntry> entries, String topic) throws SQLException {
+    // Acquire sequence lock once: SELECT ... FOR UPDATE
+    //noinspection resource
+    var seqSelect = tx.prepareBatchStatement(dialect.getFetchNextSequence());
+    seqSelect.setString(1, topic);
+    long currentSeq;
+    try (ResultSet rs = seqSelect.executeQuery()) {
+      if (rs.next()) {
+        currentSeq = rs.getLong(1);
+      } else {
+        // No row exists yet - insert it with seq 0, then use 0 as current
+        try {
+          //noinspection resource
+          var seqInsert =
+              tx.prepareBatchStatement("INSERT INTO TXNO_SEQUENCE (topic, seq) VALUES (?, ?)");
+          seqInsert.setString(1, topic);
+          seqInsert.setLong(2, 0L);
+          seqInsert.executeUpdate();
+          currentSeq = 0L;
+        } catch (Exception e) {
+          if (indexViolation(e)) {
+            // Another transaction inserted it - retry the SELECT with a new statement
+            //noinspection resource
+            var retrySelect = tx.prepareBatchStatement(dialect.getFetchNextSequence());
+            retrySelect.setString(1, topic);
+            try (ResultSet retryRs = retrySelect.executeQuery()) {
+              if (retryRs.next()) {
+                currentSeq = retryRs.getLong(1);
+              } else {
+                throw new SQLException("Failed to get sequence for topic: " + topic);
+              }
+            }
+          } else {
+            throw e;
+          }
+        }
+      }
+    }
+
+    // Assign sequences to all batch entries: startSeq = currentSeq + 1, then +i for each
+    long startSeq = currentSeq + 1L;
+    for (int i = 0; i < entries.size(); i++) {
+      entries.get(i).setSequence(startSeq + i);
+    }
+
+    // Update sequence table once: set to currentSeq + N
+    long finalSeq = currentSeq + entries.size();
+    //noinspection resource
+    var seqUpdate =
+        tx.prepareBatchStatement("UPDATE TXNO_SEQUENCE SET seq = ? WHERE topic = ?");
+    seqUpdate.setLong(1, finalSeq);
+    seqUpdate.setString(2, topic);
+    seqUpdate.executeUpdate();
+
+    log.info(
+        "Assigned sequence numbers {} to {} for topic {}",
+        startSeq,
+        finalSeq,
+        topic);
+  }
+
+  /**
+   * Validates that all entries in a batch have the same topic (or all null) and returns the topic.
+   *
+   * @param entries The entries to validate.
+   * @return The topic if all entries share the same non-null topic, null if all entries have null
+   *     topic.
+   * @throws IllegalArgumentException If entries have inconsistent topics.
+   */
+  private String validateAndExtractTopic(List<TransactionOutboxEntry> entries) {
+    String batchTopic = null;
+    for (TransactionOutboxEntry entry : entries) {
+      if (entry.getTopic() != null) {
+        if (batchTopic == null) {
+          batchTopic = entry.getTopic();
+        } else if (!batchTopic.equals(entry.getTopic())) {
+          throw new IllegalArgumentException(
+              "All entries in a batch must have the same topic. Found topics: " + batchTopic
+                  + " and " + entry.getTopic());
+        }
+      }
+    }
+    return batchTopic;
+  }
+
   private boolean indexViolation(Exception e) {
     return (e instanceof SQLIntegrityConstraintViolationException)
         || (e.getClass().getName().equals("org.postgresql.util.PSQLException")
