@@ -29,7 +29,7 @@ org-projectlombok-lombok = "1.18.30"
 org-slf4j-slf4j-api = "2.0.17"
 org-springframework-bom = "6.2.7"
 org-springframework-boot = "3.5.0"
-org-testcontainers-bom = "1.21.0"
+org-testcontainers-bom = "2.0.3"
 
 [libraries]
 ch-qos-logback-logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "ch-qos-logback" }
@@ -81,11 +81,11 @@ org-springframework-spring-context = { module = "org.springframework:spring-cont
 org-springframework-spring-framework-bom = { module = "org.springframework:spring-framework-bom", version.ref = "org-springframework-bom" }
 org-springframework-spring-jdbc = { module = "org.springframework:spring-jdbc" }
 org-springframework-spring-tx = { module = "org.springframework:spring-tx" }
-org-testcontainers-junit-jupiter = { module = "org.testcontainers:junit-jupiter" }
-org-testcontainers-mssqlserver = { module = "org.testcontainers:mssqlserver" }
-org-testcontainers-mysql = { module = "org.testcontainers:mysql" }
-org-testcontainers-oracle-xe = { module = "org.testcontainers:oracle-xe" }
-org-testcontainers-postgresql = { module = "org.testcontainers:postgresql" }
+org-testcontainers-junit-jupiter = { module = "org.testcontainers:testcontainers-junit-jupiter" }
+org-testcontainers-mssqlserver = { module = "org.testcontainers:testcontainers-mssqlserver" }
+org-testcontainers-mysql = { module = "org.testcontainers:testcontainers-mysql" }
+org-testcontainers-oracle-xe = { module = "org.testcontainers:testcontainers-oracle-xe" }
+org-testcontainers-postgresql = { module = "org.testcontainers:testcontainers-postgresql" }
 org-testcontainers-testcontainers = { module = "org.testcontainers:testcontainers" }
 org-testcontainers-testcontainers-bom = { module = "org.testcontainers:testcontainers-bom", version.ref = "org-testcontainers-bom" }
 org-springframework-boot-bom = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "org-springframework-boot" }

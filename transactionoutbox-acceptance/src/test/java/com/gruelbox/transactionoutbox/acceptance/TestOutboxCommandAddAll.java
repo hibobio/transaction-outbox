@@ -57,11 +57,7 @@ abstract class TestOutboxCommandAddAll extends AbstractAcceptanceTest {
     // Add all commands in a transaction (null topic = unordered)
     transactionManager.inTransaction(() -> outbox.addAll(null, commands));
 
-    // Verify all were processed
-    assertTrue(latch.await(10, TimeUnit.SECONDS));
-    assertEquals(batchSize, processedCount.get());
-
-    // Verify rows were created in DB
+    // Verify rows were created in DB (check before processing completes)
     transactionManager.inTransaction(
         tx -> {
           try (PreparedStatement stmt =
@@ -75,6 +71,10 @@ abstract class TestOutboxCommandAddAll extends AbstractAcceptanceTest {
             throw new RuntimeException(e);
           }
         });
+
+    // Verify all were processed
+    assertTrue(latch.await(10, TimeUnit.SECONDS));
+    assertEquals(batchSize, processedCount.get());
   }
 
   @Test
