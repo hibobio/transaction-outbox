@@ -7,12 +7,14 @@ import com.gruelbox.transactionoutbox.*;
 import com.gruelbox.transactionoutbox.testing.AbstractAcceptanceTest;
 import com.gruelbox.transactionoutbox.testing.InterfaceProcessor;
 import com.gruelbox.transactionoutbox.testing.LatchListener;
+import com.gruelbox.transactionoutbox.testing.ProcessedEntryListener;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -224,6 +226,124 @@ abstract class TestOutboxCommandAddAll extends AbstractAcceptanceTest {
 
     // Verify all were processed
     assertTrue(latch.await(10, TimeUnit.SECONDS));
+  }
+
+  @Test
+  final void batchAddAllProcessesItemsInAdditionOrder() throws Exception {
+    int batchSize = 5;
+    String topic = "order-test-topic";
+    TransactionManager transactionManager = txManager();
+    CountDownLatch successLatch = new CountDownLatch(batchSize);
+    ProcessedEntryListener processedEntryListener = new ProcessedEntryListener(successLatch);
+
+    TransactionOutbox outbox =
+        TransactionOutbox.builder()
+            .transactionManager(transactionManager)
+            .instantiator(
+                Instantiator.using(
+                    clazz ->
+                        (InterfaceProcessor)
+                            (foo, bar) -> {
+                              // Process successfully - order will be captured by listener
+                            }))
+            .listener(processedEntryListener)
+            .persistor(Persistor.forDialect(connectionDetails().dialect()))
+            .attemptFrequency(Duration.ofMillis(100))
+            .build();
+
+    outbox.initialize();
+    clearOutbox();
+
+    // Build list of commands with distinct integer arguments in specific order
+    List<OutboxCommand> commands = new ArrayList<>();
+    for (int i = 1; i <= batchSize; i++) {
+      commands.add(
+          OutboxCommand.call(InterfaceProcessor.class, "process", int.class, String.class)
+              .withArgs(i, "value" + i)
+              .build());
+    }
+
+    // Add all commands in a transaction with topic (for ordered processing)
+    transactionManager.inTransaction(() -> outbox.addAll(topic, commands));
+
+    // Process the ordered entries
+    withRunningFlusher(outbox, () -> assertTrue(successLatch.await(10, TimeUnit.SECONDS)));
+
+    // Verify all were processed
+    List<TransactionOutboxEntry> successfulEntries = processedEntryListener.getSuccessfulEntries();
+    assertEquals(batchSize, successfulEntries.size());
+
+    // Extract the first argument (integer) from each processed entry
+    List<Integer> processedOrder = new ArrayList<>();
+    for (TransactionOutboxEntry entry : successfulEntries) {
+      Integer arg = (Integer) entry.getInvocation().getArgs()[0];
+      processedOrder.add(arg);
+    }
+
+    // Verify that items were processed in the same order as they were added
+    // (i.e., 1, 2, 3, 4, 5)
+    for (int i = 0; i < batchSize; i++) {
+      assertEquals(
+          i + 1,
+          processedOrder.get(i).intValue(),
+          "Item at position " + i + " should have been processed in order");
+    }
+  }
+
+  @Test
+  final void batchAddAllProcessesItemsInAdditionOrderUsingProcessor() throws Exception {
+    int batchSize = 7;
+    String topic = "order-test-topic-processor";
+    TransactionManager transactionManager = txManager();
+    CountDownLatch latch = new CountDownLatch(batchSize);
+    // Thread-safe list to capture processing order
+    List<Integer> processedOrder = new CopyOnWriteArrayList<>();
+
+    TransactionOutbox outbox =
+        TransactionOutbox.builder()
+            .transactionManager(transactionManager)
+            .instantiator(
+                Instantiator.using(
+                    clazz ->
+                        (InterfaceProcessor)
+                            (foo, bar) -> {
+                              // Add the first argument to the list to track processing order
+                              processedOrder.add(foo);
+                            }))
+            .listener(new LatchListener(latch))
+            .persistor(Persistor.forDialect(connectionDetails().dialect()))
+            .attemptFrequency(Duration.ofMillis(100))
+            .build();
+
+    outbox.initialize();
+    clearOutbox();
+
+    // Build list of commands with distinct integer arguments in specific order
+    List<OutboxCommand> commands = new ArrayList<>();
+    for (int i = 1; i <= batchSize; i++) {
+      commands.add(
+          OutboxCommand.call(InterfaceProcessor.class, "process", int.class, String.class)
+              .withArgs(i, "value" + i)
+              .build());
+    }
+
+    // Add all commands in a transaction with topic (for ordered processing)
+    transactionManager.inTransaction(() -> outbox.addAll(topic, commands));
+
+    // Process the ordered entries
+    withRunningFlusher(outbox, () -> assertTrue(latch.await(10, TimeUnit.SECONDS)));
+
+    // Verify all were processed
+    assertEquals(batchSize, processedOrder.size());
+
+    // Verify that items were processed in the same order as they were added
+    // (i.e., 1, 2, 3, 4, 5, 6, 7)
+    for (int i = 0; i < batchSize; i++) {
+      assertEquals(
+          i + 1,
+          processedOrder.get(i).intValue(),
+          "Item at position " + i + " should have been processed in order");
+    }
   }
 
   @Test
