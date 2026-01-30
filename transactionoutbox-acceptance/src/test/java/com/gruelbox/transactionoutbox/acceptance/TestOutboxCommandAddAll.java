@@ -54,12 +54,11 @@ abstract class TestOutboxCommandAddAll extends AbstractAcceptanceTest {
               .build());
     }
 
-    // Add all commands in a transaction (null topic = unordered)
-    transactionManager.inTransaction(() -> outbox.addAll(null, commands));
-
-    // Verify rows were created in DB (check before processing completes)
+    // Add all commands in a transaction and verify rows were created in DB
     transactionManager.inTransaction(
         tx -> {
+          outbox.addAll(null, commands);
+          // Verify count within the same transaction before commit
           try (PreparedStatement stmt =
               tx.connection()
                   .prepareStatement("SELECT COUNT(*) FROM TXNO_OUTBOX WHERE topic = '*'")) {
