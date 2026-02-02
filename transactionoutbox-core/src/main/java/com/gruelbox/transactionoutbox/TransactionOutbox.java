@@ -69,6 +69,44 @@ public interface TransactionOutbox {
   ParameterizedScheduleBuilder with();
 
   /**
+   * Adds a batch of commands to the outbox in a single efficient batch insert operation.
+   *
+   * <p>All commands are converted to {@link TransactionOutboxEntry}s and persisted using {@link
+   * Persistor#saveBatch(Transaction, java.util.List)}. Commands with {@code uniqueRequestId} set
+   * are saved individually; the rest are batch-inserted.
+   *
+   * <p>All commands in the batch share the same topic. The sequence lock is acquired once for the
+   * entire batch, all sequence numbers assigned, and then the lock is released when the transaction
+   * commits.
+   *
+   * <p>Requires an active transaction accessible via {@link ThreadLocalContextTransactionManager}.
+   * Usage example:
+   *
+   * <pre>{@code
+   * List<OutboxCommand> commands = items.stream()
+   *     .map(item -> OutboxCommand.call(MyClass.class, "myMethod", String.class, Integer.class)
+   *         .withArgs(item.getA(), item.getB())
+   *         .withDedupeKey("item:" + item.getId())
+   *         .withHeader("source", "csv-import")
+   *         .build())
+   *     .collect(Collectors.toList());
+   *
+   * transactionManager.inTransaction(() -> {
+   *     outbox.addAll("my-topic", commands);
+   * });
+   * }</pre>
+   *
+   * @param topic The topic for ordered processing. May be null for unordered processing. All commands
+   *     in the batch share this topic.
+   * @param commands The list of commands to add. May be null or empty (no-op).
+   * @throws IllegalStateException If not initialized or no active transaction.
+   * @throws UnsupportedOperationException If the transaction manager does not support thread-local
+   *     context.
+   * @throws AlreadyScheduledException If any command with uniqueRequestId already exists.
+   */
+  void addAll(String topic, List<OutboxCommand> commands);
+
+  /**
    * Flush in a single thread. Calls {@link #flush(Executor)} with an {@link Executor} which runs
    * all work in the current thread.
    *

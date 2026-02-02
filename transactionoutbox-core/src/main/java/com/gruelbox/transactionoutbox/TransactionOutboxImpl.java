@@ -99,6 +99,55 @@ final class TransactionOutboxImpl implements TransactionOutbox, Validatable {
     return new ParameterizedScheduleBuilderImpl();
   }
 
+  @Override
+  public void addAll(String topic, List<OutboxCommand> commands) {
+    if (!initialized.get()) {
+      throw new IllegalStateException("Not initialized");
+    }
+    if (!(transactionManager instanceof ThreadLocalContextTransactionManager)) {
+      throw new UnsupportedOperationException(
+          "This method requires a ThreadLocalContextTransactionManager");
+    }
+    if (commands == null || commands.isEmpty()) {
+      return;
+    }
+
+    try {
+      ((ThreadLocalContextTransactionManager) transactionManager)
+          .requireTransactionReturns(
+              tx -> {
+                // Convert commands to entries
+                List<TransactionOutboxEntry> entries = new ArrayList<>(commands.size());
+                for (OutboxCommand cmd : commands) {
+                  TransactionOutboxEntry entry = entryFromCommand(cmd, topic);
+                  validator.validate(entry);
+                  entries.add(entry);
+                }
+
+                // Save batch
+                persistor.saveBatch(tx, entries);
+
+                // Register post-commit hook for all entries
+                tx.addPostCommitHook(
+                    () -> {
+                      for (TransactionOutboxEntry entry : entries) {
+                        listener.scheduled(entry);
+                        if (entry.getTopic() != null) {
+                          log.debug("Queued {} in topic {}", entry.description(), entry.getTopic());
+                        } else {
+                          submitNow(entry);
+                          log.debug("Scheduled {} for post-commit execution", entry.description());
+                        }
+                      }
+                      log.debug("Batch scheduled {} entries", entries.size());
+                    });
+                return null;
+              });
+    } catch (Exception e) {
+      throw (RuntimeException) Utils.uncheckAndThrow(e);
+    }
+  }
+
   private boolean doFlush(Function<Transaction, Collection<TransactionOutboxEntry>> batchSource) {
     var batch =
         transactionManager.inTransactionReturns(
@@ -555,6 +604,32 @@ final class TransactionOutboxImpl implements TransactionOutbox, Validatable {
         .lastAttemptTime(null)
         .nextAttemptTime(clockProvider.get().instant())
         .uniqueRequestId(uniqueRequestId)
+        .topic(topic)
+        .build();
+  }
+
+  private TransactionOutboxEntry entryFromCommand(OutboxCommand cmd, String topic) {
+    Map<String, String> mdcToUse;
+    if (cmd.getMdc() != null) {
+      mdcToUse = cmd.getMdc();
+    } else if (serializeMdc && (MDC.getMDCAdapter() != null)) {
+      mdcToUse = MDC.getCopyOfContextMap();
+    } else {
+      mdcToUse = null;
+    }
+
+    return TransactionOutboxEntry.builder()
+        .id(UUID.randomUUID().toString())
+        .invocation(
+            new Invocation(
+                instantiator.getName(cmd.getTargetClass()),
+                cmd.getMethodName(),
+                cmd.getParameterTypes(),
+                cmd.getArgs(),
+                mdcToUse))
+        .lastAttemptTime(null)
+        .nextAttemptTime(clockProvider.get().instant())
+        .uniqueRequestId(cmd.getUniqueRequestId())
         .topic(topic)
         .build();
   }

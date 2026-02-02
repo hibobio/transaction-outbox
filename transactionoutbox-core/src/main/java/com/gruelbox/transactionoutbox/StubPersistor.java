@@ -22,6 +22,11 @@ public class StubPersistor implements Persistor {
   }
 
   @Override
+  public void saveBatch(Transaction tx, List<TransactionOutboxEntry> entries) throws Exception {
+    // No-op
+  }
+
+  @Override
   public void delete(Transaction tx, TransactionOutboxEntry entry) {
     // No-op
   }

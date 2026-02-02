@@ -413,6 +413,32 @@ There are some caveats around how accurate timing is. See the JavaDoc on the `de
 
 This is particularly useful when combined with the [nested outbox pattern](#the-nested-outbox-pattern) for creating polling/repeated or recursive tasks to throttle prcessing.
 
+### Batch writes with `addAll`
+
+For bulk operations like CSV imports or batch processing, you can build a list of commands explicitly and persist them in a single efficient batch insert:
+
+```java
+List<OutboxCommand> commands = items.stream()
+    .map(item -> OutboxCommand.call(MyClass.class, "myMethod", String.class, Integer.class)
+        .withArgs(item.getA(), item.getB())
+        .withDedupeKey("item:" + item.getId())
+        .withHeader("source", "csv-import")
+        .build())
+    .collect(Collectors.toList());
+
+transactionManager.inTransaction(() -> {
+    // Other database operations...
+    outbox.addAll("my-topic", commands);  // null topic for unordered processing
+});
+```
+
+**Key points:**
+- All commands are persisted in a single batch insert operation (except those with `uniqueRequestId`, which are saved individually)
+- All commands in one `addAll` call share the same topic (specified as the first parameter; use `null` for unordered processing)
+- The sequence lock is acquired once for the entire batch, all sequence numbers assigned, then the lock is released at commit
+- Headers (via `withHeader`) are stored in MDC and restored when commands execute
+- Parameter types must be explicitly provided (cannot be derived from args due to null values and primitives)
+
 ### Flexible serialization (beta)
 
 Most people will use the default persistor, `DefaultPersistor`, to persist tasks to a relational database. This uses `DefaultInvocationSerializer` by default, which in turn uses [GSON](https://github.com/google/gson) to serialize as JSON.  `DefaultInvocationSerializer` is extremely limited by design, with a small list of allowed classes in method arguments. 
