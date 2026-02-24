@@ -57,6 +57,10 @@ When reading the diff, look for:
    - Inconsistent validation rules between layers (API, service, DB).
    - Backwards-compatibility problems for clients.
 
+8. **Type/schema changes and deserialization compatibility (Scala / Play JSON)**
+   - When a PR **adds or removes fields** on types that are **serialized and deserialized** with Play JSON (e.g. from cache, APIs, event payloads, stored JSON), check that deserialization stays **backward compatible** with existing data.
+   - The macro-generated `Json.reads[T]` does **not** use case-class default values when a key is **missing** in the JSON. Adding a new field (even with a default in the case class) can break reading existing data and cause `JsResultException` (e.g. `error.path.missing`). Flag such changes and suggest adding a **custom `Reads`** that supplies a default when the key is absent. Removing fields can break if old data still contains them unless the format ignores unknown keys.
+
 Only raise **performance** issues if they are clearly problematic or obviously worse than the previous implementation (e.g., turning an O(n) operation into O(n²) in a hot path).
 
 ---
