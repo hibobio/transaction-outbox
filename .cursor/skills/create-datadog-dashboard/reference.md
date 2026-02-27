@@ -167,13 +167,15 @@ For pre-built dashboard components.
 ### Kafka Lag Powerpack
 - **ID**: `02a5c08a-34b4-11f0-8eb6-da7ad0900005`
 - **Purpose**: Kafka consumer lag monitoring
-- **Template Variables**: `cluster_name`, `topic`
+- **Template Variables**: `cluster` (prefix "cluster_name"), `topic` (prefix "topic")
+- **Topic values**: The `topic` variable accepts **multiple values** (array of topic names) to restrict the powerpack to those topics. When generating a **service-specific** dashboard, set `topic.values` to the list of topics discovered from that service's repository (see SKILL.md Step 1.2).
 - **Background Color**: `"vivid_orange"`
 
 ### Kafka Throughput Powerpack
 - **ID**: `b56f52e8-34b0-11f0-a297-da7ad0900005`
 - **Purpose**: Kafka message throughput monitoring
-- **Template Variables**: `cluster_name`, `topic`
+- **Template Variables**: `cluster` (prefix "cluster_name"), `topic` (prefix "topic")
+- **Topic values**: The `topic` variable accepts **multiple values** (array of topic names) to restrict the powerpack to those topics. When generating a **service-specific** dashboard, set `topic.values` to the list of topics discovered from that service's repository (see SKILL.md Step 1.2).
 - **Background Color**: `"vivid_orange"`
 
 ## Common Metric Query Patterns
