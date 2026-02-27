@@ -90,6 +90,29 @@ Search for:
 - Check `build.gradle.kts` or `build.gradle` for eventstream dependency
 - Older versions may not support metrics collection
 
+### Step 1.2: Discover Kafka Topics
+
+When Kafka/eventstream usage is detected, search the **target service repository** for topic names to use in Kafka powerpacks (Lag, Throughput). Only run this step when the service uses Kafka/eventstream.
+
+**Search for topic names using:**
+
+- **Annotations**: `@EventSubscriber` (or equivalent) with `topic\s*=\s*"([^"]+)"` (Kotlin/Java/Scala). Extract the quoted topic string.
+- **Constants**: Names containing `TOPIC` or `topic` with string values (e.g. `const val X_TOPIC = "..."`, `val topicName = "..."`). Extract values that look like topic names (dotted, e.g. `audit.public-api-audit.v1`).
+- **Metric queries in code**: In strings containing `kafka.subscriber.*`, find `topic:([a-zA-Z0-9._-]+)` and collect the captured topic names.
+- **Config**: In `application*.yml` / `application*.yaml`, under eventstream/kafka/subscriber (or similar) sections, look for keys `topic:`, `topics:`, or nested topic values. Collect values matching a topic-like pattern (e.g. `something.something.v1`, dotted names).
+- **Publishing**: In client libraries or facades used by the service, search for constants or config like `AUDIT_TOPIC_NAME`, `topicName`, `topic = "..."` and extract topic strings.
+
+**Normalize and deduplicate:**
+
+- Collect unique topic names across all matches.
+- Drop obvious non-topics (e.g. single words with no dots, pure numbers, empty strings).
+- Prefer exact strings as they appear in code/config (e.g. `audit.public-api-audit.v1`).
+
+**Output:**
+
+- A list of topic names to use in powerpack `topic` template variable values.
+- **If Kafka is used but no topics are found**: Use an empty `values` array for `topic` in the powerpacks and add a short note in the dashboard description that the user should configure Kafka topic filters manually in Datadog.
+
 ### Step 1.5: Detect Log Markers (Optional)
 
 **IMPORTANT**: There will be many log invocations - apply strict filtering to avoid being overwhelmed.
@@ -217,9 +240,66 @@ Group metrics into categories:
    - Connection timeouts: `sum:hikaricp.connections.timeout{service:<service-name>} by {host}.as_count()`
 
 4. **Kafka Group** (if Kafka used):
-   - Subscriber metrics: `kafka.subscriber.bulk.processing.time.*`, `kafka.subscriber.bulk.size.*`
-   - Kafka Lag Powerpack: `02a5c08a-34b4-11f0-8eb6-da7ad0900005`
-   - Kafka Throughput Powerpack: `b56f52e8-34b0-11f0-a297-da7ad0900005`
+
+   **CRITICAL: Use only topics discovered in Step 1.2**
+
+   When adding Kafka Lag and Kafka Throughput powerpacks, set `template_variables.controlled_by_powerpack` so that only the microservice's topics are shown. Use the topic list from Step 1.2; do not guess or use a generic list.
+
+   - **Subscriber metrics** (optional group): `kafka.subscriber.bulk.processing.time.*`, `kafka.subscriber.bulk.size.*` with `topic:<topic-name>` for each discovered topic.
+   - **Kafka Lag Powerpack**: `02a5c08a-34b4-11f0-8eb6-da7ad0900005`
+   - **Kafka Throughput Powerpack**: `b56f52e8-34b0-11f0-a297-da7ad0900005`
+
+   **Powerpack template_variables (required for both Lag and Throughput):**
+
+   - **cluster**: `{"name": "cluster", "prefix": "cluster_name", "values": ["<cluster-name>"]}`. Use default cluster name `hibob-prod-eu-west-1-msk` unless the environment uses a different MSK cluster (e.g. from devops/repository config).
+   - **topic**: `{"name": "topic", "prefix": "topic", "values": [<discovered-topic-names>]}` where `<discovered-topic-names>` is the list from Step 1.2 (each topic as a string in the array). Multiple topics are allowed.
+   - **Edge case**: If Kafka is used but no topics were discovered (Step 1.2 returned empty), use `"values": []` for topic and add a one-line note in the dashboard description that Kafka topic filters should be set manually in Datadog.
+
+   **Kafka Lag Powerpack widget (reference: samples/audit-service.json):**
+   ```json
+   {
+     "id": <unique_id>,
+     "definition": {
+       "title": "Kafka Lag",
+       "background_color": "vivid_orange",
+       "show_title": true,
+       "powerpack_id": "02a5c08a-34b4-11f0-8eb6-da7ad0900005",
+       "template_variables": {
+         "controlled_externally": [],
+         "controlled_by_powerpack": [
+           {"name": "cluster", "prefix": "cluster_name", "values": ["hibob-prod-eu-west-1-msk"]},
+           {"name": "topic", "prefix": "topic", "values": ["<topic1>", "<topic2>"]}
+         ]
+       },
+       "type": "powerpack"
+     },
+     "layout": {"x": 0, "y": 0, "width": 12, "height": 6}
+   }
+   ```
+   Replace `["<topic1>", "<topic2>"]` with the actual list of topics discovered in Step 1.2.
+
+   **Kafka Throughput Powerpack widget (reference: samples/audit-service.json):**
+   ```json
+   {
+     "id": <unique_id>,
+     "definition": {
+       "title": "Kafka Throughput",
+       "background_color": "vivid_orange",
+       "show_title": true,
+       "powerpack_id": "b56f52e8-34b0-11f0-a297-da7ad0900005",
+       "template_variables": {
+         "controlled_externally": [],
+         "controlled_by_powerpack": [
+           {"name": "cluster", "prefix": "cluster_name", "values": ["hibob-prod-eu-west-1-msk"]},
+           {"name": "topic", "prefix": "topic", "values": ["<topic1>", "<topic2>"]}
+         ]
+       },
+       "type": "powerpack"
+     },
+     "layout": {"x": 0, "y": 0, "width": 12, "height": 7}
+   }
+   ```
+   Replace `["<topic1>", "<topic2>"]` with the actual list of topics discovered in Step 1.2.
 
 5. **Cache Group** (if cache is used): Cache monitoring group
 
