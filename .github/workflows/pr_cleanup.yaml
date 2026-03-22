@@ -1,0 +1,24 @@
+name: PR cleanup post merge
+
+on:
+  pull_request:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to clean up'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  deployments: write
+  pull-requests: write
+
+jobs:
+  cleanup:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    uses: hibobio/reusable-workflows/.github/workflows/pr-cleanup.yaml@master
+    with:
+      pr_number: ${{ inputs.pr_number || github.event.pull_request.number }}
+    secrets: inherit
