@@ -220,7 +220,7 @@ class TestH2 extends AbstractAcceptanceTest {
             .build();
     cleanupOutbox.flush();
 
-    long ageAfterProcessing = outbox.getOldestPendingEventAgeSeconds();
+    long ageAfterProcessing = cleanupOutbox.getOldestPendingEventAgeSeconds();
     assertEquals(0L, ageAfterProcessing, "No pending events after processing");
   }
 }
