@@ -211,16 +211,17 @@ class TestH2 extends AbstractAcceptanceTest {
     assertTrue(age >= 2, "Age should be at least 2 seconds, but was: " + age);
     assertTrue(age < 10, "Age should be less than 10 seconds, but was: " + age);
 
-    // Clean up - flush to process the event with a real executor
+    // Clean up - create a new outbox with active submitter and flush pending events
     TransactionOutbox cleanupOutbox =
         TransactionOutbox.builder()
             .transactionManager(transactionManager)
             .instantiator(Instantiator.using(clazz -> (InterfaceProcessor) (foo, bar) -> {}))
             .persistor(Persistor.forDialect(connectionDetails().dialect()))
             .build();
+    
     cleanupOutbox.flush();
-
-    long ageAfterProcessing = cleanupOutbox.getOldestPendingEventAgeSeconds();
-    assertEquals(0L, ageAfterProcessing, "No pending events after processing");
+    
+    // Verify no pending events remain
+    assertEquals(0L, outbox.getOldestPendingEventAgeSeconds(), "No pending events after processing");
   }
 }
