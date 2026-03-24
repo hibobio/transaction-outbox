@@ -1,5 +1,6 @@
 package com.gruelbox.transactionoutbox.acceptance;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -9,10 +10,13 @@ import com.gruelbox.transactionoutbox.testing.InterfaceProcessor;
 import com.gruelbox.transactionoutbox.testing.LatchListener;
 import com.gruelbox.transactionoutbox.testing.OrderedEntryListener;
 import java.lang.reflect.InvocationTargetException;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.slf4j.MDC;
 
@@ -167,5 +171,58 @@ class TestH2 extends AbstractAcceptanceTest {
     transactionManager.inTransaction(
         () -> outbox.schedule(InterfaceProcessor.class).process(1, "bar"));
     assertTrue(latch.await(5, TimeUnit.SECONDS));
+  }
+
+  @Test
+  final void getOldestPendingEventAgeSeconds_noPendingEvents() {
+    TransactionManager transactionManager = txManager();
+    TransactionOutbox outbox =
+        TransactionOutbox.builder()
+            .transactionManager(transactionManager)
+            .persistor(Persistor.forDialect(connectionDetails().dialect()))
+            .build();
+
+    outbox.initialize();
+    clearOutbox();
+
+    assertEquals(0L, outbox.getOldestPendingEventAgeSeconds());
+  }
+
+  @Test
+  final void getOldestPendingEventAgeSeconds_withPendingEvents() throws Exception {
+    TransactionManager transactionManager = txManager();
+    
+    Instant start = Instant.now();
+    AtomicReference<Instant> currentTime = new AtomicReference<>(start);
+    
+    TransactionOutbox outbox =
+        TransactionOutbox.builder()
+            .transactionManager(transactionManager)
+            .instantiator(Instantiator.using(clazz -> (InterfaceProcessor) (foo, bar) -> {}))
+            .persistor(Persistor.forDialect(connectionDetails().dialect()))
+            .attemptFrequency(Duration.ofMillis(500))
+            .submitter(Submitter.withExecutor(r -> {})) // Don't submit - keep it pending
+            .clockProvider(() -> Clock.fixed(currentTime.get(), ZoneOffset.UTC))
+            .initializeImmediately(false)
+            .build();
+
+    outbox.initialize();
+    clearOutbox();
+
+    // Schedule an event at time T
+    transactionManager.inTransaction(
+        () -> outbox.schedule(InterfaceProcessor.class).process(1, "bar"));
+
+    // Advance clock by 3 seconds
+    currentTime.set(start.plusSeconds(3));
+
+    long age = outbox.getOldestPendingEventAgeSeconds();
+    assertEquals(3L, age, "Age should be exactly 3 seconds");
+
+    // Clean up by clearing the outbox
+    clearOutbox();
+    
+    // Verify no pending events remain
+    assertEquals(0L, outbox.getOldestPendingEventAgeSeconds(), "No pending events after cleanup");
   }
 }
