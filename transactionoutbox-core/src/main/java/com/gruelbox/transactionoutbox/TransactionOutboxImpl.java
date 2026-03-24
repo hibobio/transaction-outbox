@@ -372,23 +372,19 @@ final class TransactionOutboxImpl implements TransactionOutbox, Validatable {
     if (!initialized.get()) {
       throw new IllegalStateException("Not initialized");
     }
-    try {
-      return transactionManager.inTransactionReturns(
-          tx -> {
-            try {
-              Instant oldestTime = persistor.getOldestPendingEventTime(tx);
-              if (oldestTime == null) {
-                return 0L;
-              }
-              Instant now = clockProvider.get().instant();
-              return now.getEpochSecond() - oldestTime.getEpochSecond();
-            } catch (Exception e) {
-              throw (RuntimeException) Utils.uncheckAndThrow(e);
+    return transactionManager.inTransactionReturns(
+        tx -> {
+          try {
+            Instant oldestTime = persistor.getOldestPendingEventTime(tx);
+            if (oldestTime == null) {
+              return 0L;
             }
-          });
-    } catch (Exception e) {
-      throw (RuntimeException) Utils.uncheckAndThrow(e);
-    }
+            Instant now = clockProvider.get().instant();
+            return now.getEpochSecond() - oldestTime.getEpochSecond();
+          } catch (Exception e) {
+            throw (RuntimeException) Utils.uncheckAndThrow(e);
+          }
+        });
   }
 
   private <T> T schedule(

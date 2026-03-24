@@ -188,6 +188,11 @@ class TestH2 extends AbstractAcceptanceTest {
   @Test
   final void getOldestPendingEventAgeSeconds_withPendingEvents() throws Exception {
     TransactionManager transactionManager = txManager();
+    
+    Instant start = Instant.now();
+    java.util.concurrent.atomic.AtomicReference<Instant> currentTime = 
+        new java.util.concurrent.atomic.AtomicReference<>(start);
+    
     TransactionOutbox outbox =
         TransactionOutbox.builder()
             .transactionManager(transactionManager)
@@ -195,21 +200,22 @@ class TestH2 extends AbstractAcceptanceTest {
             .persistor(Persistor.forDialect(connectionDetails().dialect()))
             .attemptFrequency(Duration.ofMillis(500))
             .submitter(Submitter.withExecutor(r -> {})) // Don't submit - keep it pending
+            .clockProvider(() -> java.time.Clock.fixed(currentTime.get(), java.time.ZoneOffset.UTC))
             .initializeImmediately(false)
             .build();
 
     outbox.initialize();
     clearOutbox();
 
-    // Schedule an event but prevent it from being processed
+    // Schedule an event at time T
     transactionManager.inTransaction(
         () -> outbox.schedule(InterfaceProcessor.class).process(1, "bar"));
 
-    Thread.sleep(2000);
+    // Advance clock by 3 seconds
+    currentTime.set(start.plusSeconds(3));
 
     long age = outbox.getOldestPendingEventAgeSeconds();
-    assertTrue(age >= 2, "Age should be at least 2 seconds, but was: " + age);
-    assertTrue(age < 10, "Age should be less than 10 seconds, but was: " + age);
+    assertEquals(3L, age, "Age should be exactly 3 seconds");
 
     // Clean up by clearing the outbox
     clearOutbox();
