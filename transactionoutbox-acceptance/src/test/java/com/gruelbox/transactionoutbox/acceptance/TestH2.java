@@ -10,10 +10,13 @@ import com.gruelbox.transactionoutbox.testing.InterfaceProcessor;
 import com.gruelbox.transactionoutbox.testing.LatchListener;
 import com.gruelbox.transactionoutbox.testing.OrderedEntryListener;
 import java.lang.reflect.InvocationTargetException;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.slf4j.MDC;
 
@@ -190,8 +193,7 @@ class TestH2 extends AbstractAcceptanceTest {
     TransactionManager transactionManager = txManager();
     
     Instant start = Instant.now();
-    java.util.concurrent.atomic.AtomicReference<Instant> currentTime = 
-        new java.util.concurrent.atomic.AtomicReference<>(start);
+    AtomicReference<Instant> currentTime = new AtomicReference<>(start);
     
     TransactionOutbox outbox =
         TransactionOutbox.builder()
@@ -200,7 +202,7 @@ class TestH2 extends AbstractAcceptanceTest {
             .persistor(Persistor.forDialect(connectionDetails().dialect()))
             .attemptFrequency(Duration.ofMillis(500))
             .submitter(Submitter.withExecutor(r -> {})) // Don't submit - keep it pending
-            .clockProvider(() -> java.time.Clock.fixed(currentTime.get(), java.time.ZoneOffset.UTC))
+            .clockProvider(() -> Clock.fixed(currentTime.get(), ZoneOffset.UTC))
             .initializeImmediately(false)
             .build();
 
