@@ -1,0 +1,12 @@
+name: Validate CODEOWNERS
+
+on:
+  pull_request:
+    paths:
+      - '.github/CODEOWNERS'
+    types: [opened, synchronize, reopened]
+
+jobs:
+  validate:
+    uses: hibobio/reusable-workflows/.github/workflows/codeowners.yml@master
+    secrets: inherit
